@@ -68,7 +68,8 @@ async function readBody(req) {
 }
 
 async function serveStatic(publicDir, pathname) {
-  const rel = pathname === '/' ? 'index.html' : decodeURIComponent(pathname.slice(1));
+  let rel;
+  try { rel = pathname === '/' ? 'index.html' : decodeURIComponent(pathname.slice(1)); } catch { throw new HttpError(404, 'not found'); }
   const type = STATIC_TYPES[extname(rel)];
   const root = resolve(publicDir) + sep;
   const full = resolve(publicDir, normalize(rel));

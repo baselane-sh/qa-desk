@@ -202,6 +202,88 @@ test('an adopted orphan with no pull request keeps the orphan wording, not the g
   assert.equal(d.dispatch.error, 'orphaned by restart, check the issue');
 });
 
+test('enqueue refuses a defect that is already running or already queued', async () => {
+  const s = await setup({ prUrl: 'https://github.com/o/r/pull/3' });
+  const second = await createDefect(s.paths, { runId: 'R-0001', caseId: 'QA-0002', tracker: 'github', issueId: '18', url: 'u' }, { now });
+  const first = await s.dispatcher.enqueue('D-0001');
+  assert.deepEqual(first, { state: 'running' });
+  const queued = await s.dispatcher.enqueue(second.id);
+  assert.deepEqual(queued, { state: 'queued' });
+  await assert.rejects(s.dispatcher.enqueue('D-0001'), /dispatch already running for D-0001/);
+  await assert.rejects(s.dispatcher.enqueue(second.id), /dispatch already running/);
+  assert.equal(s.children.length, 1, 'a duplicate enqueue of a running or queued defect must not spawn a second agent');
+
+  endChild(s.children[0], 0);
+  const deadline = Date.now() + 3000;
+  let secondDefect = await getDefect(s.paths, second.id);
+  while (secondDefect.dispatch.state !== 'running') {
+    if (Date.now() > deadline) throw new Error(`the queued dispatch never started (state: ${secondDefect.dispatch.state})`);
+    await new Promise((r) => setTimeout(r, 5));
+    secondDefect = await getDefect(s.paths, second.id);
+  }
+  endChild(s.children[1], 0);
+  await settled(s.dispatcher);
+  // The first run's outcome must survive: the duplicate enqueue rejected instead of
+  // overwriting it with a second "running" record.
+  assert.equal((await getDefect(s.paths, 'D-0001')).dispatch.state, 'pr-open');
+});
+
+test('two concurrent enqueues of different defects spawn only one child and queue the other', async () => {
+  const s = await setup();
+  const second = await createDefect(s.paths, { runId: 'R-0001', caseId: 'QA-0002', tracker: 'github', issueId: '18', url: 'u' }, { now });
+  const [a, b] = await Promise.all([s.dispatcher.enqueue('D-0001'), s.dispatcher.enqueue(second.id)]);
+  assert.deepEqual([a.state, b.state].sort(), ['queued', 'running']);
+  assert.equal(s.children.length, 1, 'only one child may spawn from two concurrent enqueues');
+  const runningId = a.state === 'running' ? 'D-0001' : second.id;
+  const queuedId = runningId === 'D-0001' ? second.id : 'D-0001';
+  assert.equal((await getDefect(s.paths, runningId)).dispatch.state, 'running');
+  assert.equal((await getDefect(s.paths, queuedId)).dispatch.state, 'queued');
+
+  endChild(s.children[0], 0);
+  const deadline = Date.now() + 3000;
+  let queuedDefect = await getDefect(s.paths, queuedId);
+  while (queuedDefect.dispatch.state !== 'running') {
+    if (Date.now() > deadline) throw new Error(`the queued dispatch never started (state: ${queuedDefect.dispatch.state})`);
+    await new Promise((r) => setTimeout(r, 5));
+    queuedDefect = await getDefect(s.paths, queuedId);
+  }
+  endChild(s.children[1], 0);
+  await settled(s.dispatcher);
+});
+
+test('recoverOnStart re-enqueues a stranded queued defect, oldest first, and starts one when nothing is running', async () => {
+  const s = await setup();
+  const second = await createDefect(s.paths, { runId: 'R-0001', caseId: 'QA-0002', tracker: 'github', issueId: '18', url: 'u' }, { now });
+  const { patchDispatch } = await import('../scripts/lib/defects.mjs');
+  await patchDispatch(s.paths, 'D-0001', { state: 'queued', error: null });
+  await patchDispatch(s.paths, second.id, { state: 'queued', error: null });
+  const dead = await s.dispatcher.recoverOnStart();
+  assert.deepEqual(dead, []);
+  assert.equal(s.dispatcher.current(), 'D-0001', 'the oldest queued defect starts first');
+
+  const startDeadline = Date.now() + 3000;
+  let firstDefect = await getDefect(s.paths, 'D-0001');
+  while (firstDefect.dispatch.state !== 'running') {
+    if (Date.now() > startDeadline) throw new Error(`the recovered queued dispatch never started (state: ${firstDefect.dispatch.state})`);
+    await new Promise((r) => setTimeout(r, 5));
+    firstDefect = await getDefect(s.paths, 'D-0001');
+  }
+  assert.equal(s.children.length, 1);
+  assert.equal((await getDefect(s.paths, second.id)).dispatch.state, 'queued');
+
+  endChild(s.children[0], 0);
+  const deadline = Date.now() + 3000;
+  let secondDefect = await getDefect(s.paths, second.id);
+  while (secondDefect.dispatch.state !== 'running') {
+    if (Date.now() > deadline) throw new Error(`the second queued defect never started (state: ${secondDefect.dispatch.state})`);
+    await new Promise((r) => setTimeout(r, 5));
+    secondDefect = await getDefect(s.paths, second.id);
+  }
+  assert.equal(s.children.length, 2);
+  endChild(s.children[1], 0);
+  await settled(s.dispatcher);
+});
+
 test('enqueue refuses an issue id that is not a plain identifier', async () => {
   const s = await setup();
   const { patchDefect } = await import('../scripts/lib/defects.mjs');

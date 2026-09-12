@@ -4,13 +4,15 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
+import { EventEmitter } from 'node:events';
 import { createApp, checkRequest, execFileWithInput } from '../scripts/server.mjs';
+import { createDispatcher } from '../scripts/lib/dispatch.mjs';
 import { writeJsonAtomic } from '../scripts/lib/store.mjs';
 import { dataPaths } from '../scripts/lib/paths.mjs';
 import { createDefect, patchDispatch } from '../scripts/lib/defects.mjs';
 import { TEST_CONFIG, sampleCase } from './fixtures/config.mjs';
 
-async function boot({ tracker, dispatcher } = {}) {
+async function boot({ tracker, dispatcher, dispatcherFactory } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'srv-'));
   const paths = dataPaths(root);
   await mkdir(paths.dir, { recursive: true });
@@ -22,7 +24,9 @@ async function boot({ tracker, dispatcher } = {}) {
   const app = createApp({
     config: TEST_CONFIG, paths, publicDir, executedBy: 'tester',
     tracker: tracker ?? { name: 'github', create: async () => ({ id: '17', url: 'https://github.com/o/r/issues/17' }), show: async () => ({ id: '17', url: 'u', state: 'open', notes: '' }) },
-    dispatcher: dispatcher ?? { enqueue: async () => ({ state: 'running' }), current: () => null },
+    // dispatcherFactory lets a test build a real dispatcher once it knows this boot's paths
+    // and root, so a dispatch route exercises the actual queue guard instead of a mock.
+    dispatcher: dispatcherFactory ? dispatcherFactory({ paths, root }) : (dispatcher ?? { enqueue: async () => ({ state: 'running' }), current: () => null }),
   });
   await new Promise((r) => app.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${app.address().port}`;
@@ -40,8 +44,9 @@ async function makeRun(s, caseIds = ['QA-0001', 'QA-0002']) {
   return r.body.data;
 }
 
-test('static files: index, nested js with the right type, traversal and unknown types refused', async () => {
+test('static files: index, nested js with the right type, traversal and unknown types refused', async (t) => {
   const s = await boot();
+  t.after(() => s.close());
   const index = await s.call('GET', '/');
   assert.match(index.body, /<title>qa-desk/); assert.match(index.type, /text\/html/);
   const js = await s.call('GET', '/views/cases.js');
@@ -49,20 +54,21 @@ test('static files: index, nested js with the right type, traversal and unknown 
   assert.equal((await s.call('GET', '/../package.json')).status, 404);
   assert.equal((await s.call('GET', '/%2e%2e/package.json')).status, 404);
   assert.equal((await s.call('GET', '/nope.txt')).status, 404);
-  await s.close();
+  assert.equal((await s.call('GET', '/%')).status, 404);
 });
 
-test('GET /api/config and /api/cases', async () => {
+test('GET /api/config and /api/cases', async (t) => {
   const s = await boot();
+  t.after(() => s.close());
   assert.equal((await s.call('GET', '/api/config')).body.data.project, 'QA');
   const r = await s.call('GET', '/api/cases');
   assert.equal(r.body.data.length, 2);
   assert.equal(r.body.data[0].execution, undefined);
-  await s.close();
 });
 
-test('runs: create, list, get, execution, cases with runId, history', async () => {
+test('runs: create, list, get, execution, cases with runId, history', async (t) => {
   const s = await boot();
+  t.after(() => s.close());
   const run = await makeRun(s);
   assert.equal(run.id, 'R-0001');
   assert.equal((await s.call('POST', '/api/runs', { name: 'x', build: 'b', env: 'staging', caseIds: ['QA-0099'] })).status, 400);
@@ -78,11 +84,11 @@ test('runs: create, list, get, execution, cases with runId, history', async () =
   assert.equal(cases.body.data[1].execution, null);
   assert.equal((await s.call('GET', '/api/cases/QA-0001/history')).body.data.length, 1);
   assert.equal((await s.call('GET', '/api/runs/R-0009')).status, 404);
-  await s.close();
 });
 
-test('an execution with no status is rejected until one exists, then a status-free patch is fine', async () => {
+test('an execution with no status is rejected until one exists, then a status-free patch is fine', async (t) => {
   const s = await boot();
+  t.after(() => s.close());
   await makeRun(s);
   assert.equal((await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', {})).status, 400);
   assert.equal((await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { actual: 'still setting up' })).status, 400);
@@ -91,12 +97,12 @@ test('an execution with no status is rejected until one exists, then a status-fr
   const second = await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { actual: 'more detail' });
   assert.equal(second.status, 200);
   assert.equal(second.body.data.status, 'failed');
-  await s.close();
 });
 
-test('defects: needs a failed or blocked execution, creates once, shows with issue, dispatches', async () => {
+test('defects: needs a failed or blocked execution, creates once, shows with issue, dispatches', async (t) => {
   const created = [];
   const s = await boot({ tracker: { name: 'github', create: async (x) => { created.push(x); return { id: '17', url: 'https://github.com/o/r/issues/17' }; }, show: async () => ({ id: '17', url: 'u', state: 'open', notes: 'n' }) } });
+  t.after(() => s.close());
   await makeRun(s);
   assert.equal((await s.call('POST', '/api/defects', { runId: 'R-0001', caseId: 'QA-0001' })).status, 400);
   await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'failed', actual: 'boom' });
@@ -111,23 +117,47 @@ test('defects: needs a failed or blocked execution, creates once, shows with iss
   assert.equal(shown.body.data.issue.notes, 'n');
   assert.equal((await s.call('POST', '/api/defects/D-0001/dispatch')).body.data.state, 'running');
   assert.equal((await s.call('GET', '/api/defects/D-0009')).status, 404);
-  await s.close();
 });
 
-test('defects created against the beads tracker carry only qa-desk and component labels', async () => {
+test('defects created against the beads tracker carry only qa-desk and component labels', async (t) => {
   const created = [];
   const s = await boot({ tracker: { name: 'beads', create: async (x) => { created.push(x); return { id: '9', url: null }; }, show: async () => ({ id: '9', url: null, state: 'open', notes: '' }) } });
+  t.after(() => s.close());
   await makeRun(s);
   await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'failed', actual: 'boom' });
   await s.call('POST', '/api/defects', { runId: 'R-0001', caseId: 'QA-0001' });
   assert.deepEqual(created[0].labels, ['qa-desk', 'auth']);
-  await s.close();
 });
 
-test('dispatch refusals map to 409 and the log is served only from the log dir', async () => {
-  const s = await boot({ dispatcher: { enqueue: async () => { throw new Error('dispatch already running for D-0001'); }, current: () => 'D-0001' } });
+function fakeSpawn() {
+  const children = [];
+  const spawn = () => {
+    const child = new EventEmitter();
+    child.pid = 4242; child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+    children.push(child);
+    return child;
+  };
+  return { spawn, children };
+}
+
+test('dispatch refusals map to 409 through the real dispatcher, and the log is served only from the log dir', async (t) => {
+  const { spawn, children } = fakeSpawn();
+  const execFile = async () => ({ stdout: '[]', stderr: '' });
+  const s = await boot({
+    dispatcherFactory: ({ paths, root }) => createDispatcher({
+      spawn, execFile, paths, repoRoot: root, config: TEST_CONFIG,
+      tracker: { readCommand: () => ['gh'], noteCommand: () => ['gh'] },
+      promptTemplate: 'fix {issueId}', now: () => '2026-09-12T12:00:00.000Z',
+    }),
+  });
+  t.after(() => { children.forEach((c) => { c.emit('exit', 0); c.emit('close', 0); }); return s.close(); });
   await createDefect(s.paths, { runId: 'R-0001', caseId: 'QA-0001', tracker: 'github', issueId: '17', url: 'u' });
-  assert.equal((await s.call('POST', '/api/defects/D-0001/dispatch')).status, 409);
+  const first = await s.call('POST', '/api/defects/D-0001/dispatch');
+  assert.equal(first.status, 200);
+  assert.equal(first.body.data.state, 'running');
+  // The dispatcher, not a mock, refuses the duplicate: this is the guard NEW-1 restored.
+  const second = await s.call('POST', '/api/defects/D-0001/dispatch');
+  assert.equal(second.status, 409);
   await mkdir(s.paths.logs, { recursive: true });
   await writeFile(join(s.paths.logs, '17.log'), 'a\nb\nc\n');
   await patchDispatch(s.paths, 'D-0001', { state: 'running', log: join(s.paths.logs, '17.log') });
@@ -135,7 +165,6 @@ test('dispatch refusals map to 409 and the log is served only from the log dir',
   assert.match(log.type, /text\/plain/); assert.equal(log.body, 'a\nb\nc\n');
   await patchDispatch(s.paths, 'D-0001', { log: '/etc/passwd' });
   assert.equal((await s.call('GET', '/api/defects/D-0001/log')).status, 400);
-  await s.close();
 });
 
 test('checkRequest refuses foreign origins, hosts and non-JSON writes', () => {
@@ -146,8 +175,9 @@ test('checkRequest refuses foreign origins, hosts and non-JSON writes', () => {
   assert.equal(checkRequest({ method: 'POST', headers: { host: '127.0.0.1:4173', 'content-type': 'text/plain' } }, ok).status, 415);
 });
 
-test('a foreign Host header gets 403 over the wire', async () => {
+test('a foreign Host header gets 403 over the wire', async (t) => {
   const s = await boot();
+  t.after(() => s.close());
   // fetch drops a forbidden Host header, so use http.request with setHost off.
   const status = await new Promise((resolveStatus, rejectStatus) => {
     const req = request({ host: '127.0.0.1', port: s.port, path: '/api/config', method: 'GET', setHost: false, headers: { host: 'evil.test:1' } }, (res) => { res.resume(); resolveStatus(res.statusCode); });
@@ -155,7 +185,6 @@ test('a foreign Host header gets 403 over the wire', async () => {
     req.end();
   });
   assert.equal(status, 403);
-  await s.close();
 });
 
 test('execFileWithInput writes stdin and surfaces stderr on failure', async () => {

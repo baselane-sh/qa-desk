@@ -33,6 +33,9 @@ export function createDispatcher({ spawn, execFile, paths, repoRoot, config, tra
   function startNextPending() {
     const next = pending.shift();
     if (next === undefined) return;
+    // Claimed synchronously, in the same tick as the shift, so a call to enqueue that
+    // interleaves with this one sees running already set and queues instead of spawning.
+    running = next;
     start(next).catch((err) => console.error(`qa-desk: could not start the next queued dispatch ${next}: ${err.message}`));
   }
 
@@ -95,14 +98,27 @@ export function createDispatcher({ spawn, execFile, paths, repoRoot, config, tra
     });
   }
 
-  async function start(defectId) {
-    const defect = await getDefect(paths, defectId);
+  // The issue id feeds a file name and an argv, so do not trust it just because the tracker
+  // returned it.
+  function assertDispatchable(defect, defectId) {
     if (!defect) throw new Error(`unknown defect ${defectId}`);
-    running = defectId;
+    if (!ISSUE_ID_RE.test(String(defect.issueId))) throw new Error(`issue id ${defect.issueId} is not a plain identifier`);
+  }
+
+  /**
+   * `running` must already be claimed for `defectId` by the caller (either
+   * `enqueue` or `startNextPending`), synchronously and before this function's
+   * first await. Doing the claim here instead would leave a window between
+   * that claim and the caller's own synchronous check, where a second
+   * enqueue racing in the same tick could see `running` still null.
+   */
+  async function start(defectId) {
     let child;
     let stream;
     let prepared;
     try {
+      const defect = await getDefect(paths, defectId);
+      assertDispatchable(defect, defectId);
       prepared = await prepare(defect);
       stream = createWriteStream(prepared.log, { flags: 'a' });
       stream.on('error', (err) => console.error(`qa-desk: could not write the dispatch log for ${defectId}: ${err.message}`));
@@ -124,17 +140,32 @@ export function createDispatcher({ spawn, execFile, paths, repoRoot, config, tra
    * joins a pending list and is marked "queued" instead of being refused;
    * `finish` (and the spawn-error path) drains that list as soon as the
    * server is idle again, one at a time, in the order they were enqueued.
+   *
+   * The membership check and the claim that follows it (either pushing onto
+   * `pending` or setting `running`) happen synchronously, before any `await`
+   * in this function. That closes two races: a defect already running or
+   * queued being dispatched again (a double click on Dispatch), and two
+   * enqueues of different defects both reading `running` as null and both
+   * spawning.
    */
   async function enqueue(defectId) {
-    const defect = await getDefect(paths, defectId);
-    if (!defect) throw new Error(`unknown defect ${defectId}`);
-    // The issue id feeds a file name and an argv, so do not trust it just because the tracker returned it.
-    if (!ISSUE_ID_RE.test(String(defect.issueId))) throw new Error(`issue id ${defect.issueId} is not a plain identifier`);
-    if (running) {
-      pending.push(defectId);
-      await patchDispatch(paths, defectId, { state: 'queued', error: null });
-      return { state: 'queued' };
+    if (running === defectId || pending.includes(defectId)) {
+      throw new Error(`dispatch already running for ${defectId}`);
     }
+    if (running !== null) {
+      pending.push(defectId);
+      try {
+        const defect = await getDefect(paths, defectId);
+        assertDispatchable(defect, defectId);
+        await patchDispatch(paths, defectId, { state: 'queued', error: null });
+        return { state: 'queued' };
+      } catch (err) {
+        const idx = pending.indexOf(defectId);
+        if (idx !== -1) pending.splice(idx, 1);
+        throw err;
+      }
+    }
+    running = defectId;
     return start(defectId);
   }
 
@@ -153,13 +184,21 @@ export function createDispatcher({ spawn, execFile, paths, repoRoot, config, tra
   }
 
   async function recoverOnStart() {
-    const stale = (await listDefects(paths)).filter((d) => d.dispatch?.state === 'running');
+    const all = await listDefects(paths);
+    const stale = all.filter((d) => d.dispatch?.state === 'running');
     const dead = [];
     for (const d of stale) {
       if (isPidAlive(d.dispatch.pid)) { adoptOrphan(d.id, d.dispatch.pid, d.dispatch.branch); continue; }
       await patchDispatch(paths, d.id, { state: 'failed', endedAt: now(), error: 'server restarted' });
       dead.push(d.id);
     }
+    // A defect left "queued" across a restart is otherwise stranded: `pending` is in-memory
+    // only, and the UI disables Dispatch for anything but failed/pr-open, so nothing on disk
+    // or on screen can recover it without this. `listDefects` preserves creation order, which
+    // doubles as enqueue order for defects that were never re-ordered, so this is oldest first.
+    const queued = all.filter((d) => d.dispatch?.state === 'queued').map((d) => d.id);
+    pending.push(...queued);
+    if (running === null) startNextPending();
     return dead;
   }
 
