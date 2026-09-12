@@ -86,3 +86,21 @@ test('execution detail editors default to the run values and stay locked until a
   assert.equal(needsStatusFirst({ id: 'QA-0001', execution: null }), true);
   assert.equal(needsStatusFirst({ id: 'QA-0001', execution: { status: 'passed' } }), false);
 });
+
+test('countStatuses derives untested and summaryLabel reads as progress', async () => {
+  const { countStatuses, summaryLabel, SUMMARY_STATUSES } = await import('../public/views/runs.js');
+  assert.deepEqual(SUMMARY_STATUSES, ['passed', 'failed', 'blocked', 'skipped', 'retest', 'untested']);
+  const cases = [
+    { id: 'QA-0001', execution: { status: 'passed' } },
+    { id: 'QA-0002', execution: { status: 'failed' } },
+    { id: 'QA-0003' },
+    { id: 'QA-0004', execution: { status: 'nonsense' } },
+  ];
+  const summary = countStatuses(cases);
+  assert.equal(summary.total, 4);
+  assert.equal(summary.executed, 2);
+  assert.deepEqual(summary.counts, { passed: 1, failed: 1, blocked: 0, skipped: 0, retest: 0, untested: 2 });
+  assert.equal(summaryLabel(summary), '2 of 4 done');
+  assert.equal(summaryLabel(countStatuses([])), '0 of 0 done');
+  assert.equal(summaryLabel(null), '');
+});

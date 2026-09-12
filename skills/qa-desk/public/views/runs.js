@@ -17,6 +17,23 @@ export function needsStatusFirst(c) {
   return statusOf(c) === 'untested';
 }
 
+// The browser cannot import from scripts/lib, so this list is a copy of
+// SUMMARY_STATUSES in scripts/lib/runs.mjs. Keep the two in step.
+export const SUMMARY_STATUSES = ['passed', 'failed', 'blocked', 'skipped', 'retest', 'untested'];
+
+export function countStatuses(cases) {
+  const counts = Object.fromEntries(SUMMARY_STATUSES.map((s) => [s, 0]));
+  for (const c of cases) {
+    const status = statusOf(c);
+    counts[SUMMARY_STATUSES.includes(status) ? status : 'untested'] += 1;
+  }
+  return { total: cases.length, executed: cases.length - counts.untested, counts };
+}
+
+export function summaryLabel(summary) {
+  return summary ? `${summary.executed} of ${summary.total} done` : '';
+}
+
 function newRunForm(state, actions) {
   const { config } = state;
   const name = el('input', { placeholder: 'Sprint 12 regression' });
@@ -41,7 +58,7 @@ function runList(state, actions) {
   }
   const items = rows.map((r) => el('li', { class: state.run?.id === r.id ? 'selected' : '', onclick: () => actions.selectRun(r) }, [
     el('span', { text: `${r.id} ${r.name}` }),
-    isClosed(r) ? el('span', { class: 'badge closed', text: 'Closed' }) : el('span', { class: 'badge', text: `${r.caseIds.length} cases` }),
+    isClosed(r) ? el('span', { class: 'badge closed', text: 'Closed' }) : el('span', { class: 'badge', text: summaryLabel(r.summary) || `${r.caseIds.length} cases` }),
     el('span', { class: 'meta', text: `${r.build} · ${r.env} · ${r.createdAt.slice(0, 10)}` }),
   ]));
   return el('div', {}, [bar, el('ul', { class: 'list' }, items)]);
@@ -58,6 +75,24 @@ function closeControl(state, actions) {
     ]);
   }
   return el('button', { text: 'Close run', onclick: () => actions.askCloseRun(run.id) });
+}
+
+function statusStrip(summary) {
+  const shown = SUMMARY_STATUSES.filter((s) => summary.counts[s] > 0);
+  const width = (s) => `width:${(summary.counts[s] / Math.max(1, summary.total)) * 100}%`;
+  return el('div', { class: 'strip' }, [
+    el('div', { class: 'bar' }, shown.map((s) => el('span', { class: s, style: width(s) }))),
+    ...shown.map((s) => el('span', { class: `status ${s}`, text: `${s} ${summary.counts[s]}` })),
+  ]);
+}
+
+function statusFilter(state, actions) {
+  const box = el('select', { onchange: (e) => actions.setFilters({ ...state.filters, status: e.target.value || undefined }) }, [
+    el('option', { value: '', text: 'All statuses' }),
+    ...SUMMARY_STATUSES.map((s) => el('option', { value: s, text: s })),
+  ]);
+  box.value = state.filters.status ?? '';
+  return el('label', { class: 'inline', text: 'Status' }, [box]);
 }
 
 function closedExecutionPanel(c, state) {
@@ -141,6 +176,8 @@ export function renderRuns(root, state, actions) {
   const right = selected
     ? [renderCaseDetail(selected, state), panelFor(selected), defectPanel(selected, state, actions)]
     : [renderProgress(state), ...(state.config.roles.length ? [el('h2', { text: 'By role' }), renderProgress(state, 'role')] : []), el('p', { class: 'empty', text: 'Select a case. Keys: j/k move, p f b s r record.' })];
-  const head = el('div', { class: 'pane-head' }, [el('h2', { text: `${state.run.name} (${inRun.length})` }), closeControl(state, actions)]);
+  const summary = countStatuses(state.cases.filter((c) => state.run.caseIds.includes(c.id)));
+  const controls = el('div', { class: 'pane-head' }, [statusFilter(state, actions), closeControl(state, actions)]);
+  const head = el('div', {}, [el('div', { class: 'pane-head' }, [el('h2', { text: `${state.run.name} (${inRun.length})` }), el('span', { class: 'badge', text: summaryLabel(summary) })]), statusStrip(summary), controls]);
   root.append(left, el('section', { class: 'pane' }, [head, renderList(state, actions, inRun)]), el('section', { class: 'pane' }, right));
 }

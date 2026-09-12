@@ -48,7 +48,8 @@ async function findDefect(runId, caseId) {
 async function selectRun(run) {
   runBadge.textContent = run ? `${run.name} on ${run.build} (${run.env})` : 'No run selected';
   runBadge.classList.toggle('muted', !run);
-  setState({ run, selectedId: null, defect: null, log: '', confirmClose: null });
+  const runs = await api.get('/api/runs');
+  setState({ runs, run, selectedId: null, defect: null, log: '', confirmClose: null });
   await loadCases();
 }
 
