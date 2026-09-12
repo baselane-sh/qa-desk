@@ -315,3 +315,35 @@ test('restoreField tolerates setSelectionRange throwing on a number input, and d
   assert.equal(node.value, '30');
   assert.doesNotThrow(() => restoreField(null, { caret: [0, 0], value: 'x' }));
 });
+
+test('emptyState tells "no cases at all" apart from "the filters hid them"', async () => {
+  const { emptyState } = await import('../public/views/cases.js');
+  // The runs view regression: a run holds cases, a status filter hides every one of them.
+  // The tester must be offered Clear filters, never the generate-and-merge command.
+  const filtered = emptyState(12);
+  assert.equal(filtered.text, 'No case matches the filters.');
+  assert.equal(filtered.label, 'Clear filters');
+  assert.equal(filtered.action, 'clearFilters');
+  assert.equal(filtered.hint, null);
+  const nothing = emptyState(0);
+  assert.equal(nothing.text, 'No cases yet.');
+  assert.equal(nothing.label, 'Reload');
+  assert.equal(nothing.action, 'reload');
+  assert.match(nothing.hint, /qa-desk generate/);
+  // an absent denominator must not read as "the filters hid them"
+  assert.equal(emptyState(undefined).action, 'reload');
+});
+
+test('inRunCases returns nothing rather than throwing on a run with no case list', async () => {
+  const { inRunCases } = await import('../public/views/runs.js');
+  assert.deepEqual(inRunCases([{ id: 'QA-0001' }], null), []);
+  assert.deepEqual(inRunCases([{ id: 'QA-0001' }], {}), []);
+  assert.deepEqual(inRunCases([{ id: 'QA-0001' }, { id: 'QA-0002' }], { caseIds: ['QA-0002'] }), [{ id: 'QA-0002' }]);
+});
+
+test('restoreField leaves a node that cannot take focus alone', async () => {
+  const { restoreField } = await import('../public/ui-restore.js');
+  const node = { value: 'old' };
+  assert.doesNotThrow(() => restoreField(node, { key: 'q', caret: null, value: 'typed' }));
+  assert.equal(node.value, 'typed');
+});

@@ -13,6 +13,7 @@ export function visibleRuns(runs, { showClosed = false, selectedId = null } = {}
 // filters. This is the denominator renderList needs to tell "nothing has ever been in this
 // run" apart from "the filters hide everything that is" (see the `total` parameter).
 export function inRunCases(cases, run) {
+  if (!run?.caseIds) return [];
   return cases.filter((c) => run.caseIds.includes(c.id));
 }
 

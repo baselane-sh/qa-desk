@@ -25,7 +25,7 @@ export function captureField(activeLike) {
 // is reassigned before the caret so the caret lands in the string it is meant to address.
 export function restoreField(nodeLike, captured) {
   if (!nodeLike || !captured) return;
-  nodeLike.focus();
+  if (typeof nodeLike.focus === 'function') nodeLike.focus();
   if (captured.value !== null && captured.value !== undefined && nodeLike.value !== captured.value) {
     nodeLike.value = captured.value;
   }

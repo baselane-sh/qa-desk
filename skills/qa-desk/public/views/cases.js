@@ -103,18 +103,22 @@ export function renderProgress(state, groupKey = 'component') {
   }));
 }
 
+// Which empty state an empty list gets, decided away from the DOM so a test can hold it to
+// account. `total` is how many cases exist before the filters run: zero means the project
+// has no cases at all, any other number means the filters hid every one of them.
+export function emptyState(total) {
+  return total
+    ? { text: 'No case matches the filters.', hint: null, label: 'Clear filters', action: 'clearFilters' }
+    : { text: 'No cases yet.', hint: 'Run qa-desk generate, then qa-desk merge.', label: 'Reload', action: 'reload' };
+}
+
 export function renderList(state, actions, cases, total) {
   if (!cases.length) {
-    if (!total) {
-      return el('div', { class: 'empty' }, [
-        el('p', { text: 'No cases yet.' }),
-        el('p', { text: 'Run qa-desk generate, then qa-desk merge.' }),
-        el('button', { text: 'Reload', onclick: () => actions.reload() }),
-      ]);
-    }
+    const { text, hint, label, action } = emptyState(total);
     return el('div', { class: 'empty' }, [
-      el('p', { text: 'No case matches the filters.' }),
-      el('button', { text: 'Clear filters', onclick: () => actions.clearFilters() }),
+      el('p', { text }),
+      hint ? el('p', { text: hint }) : null,
+      el('button', { text: label, onclick: () => actions[action]() }),
     ]);
   }
   return el('ul', { class: 'list' }, cases.map((c) => {

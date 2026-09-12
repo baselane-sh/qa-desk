@@ -7,7 +7,7 @@ import { captureField, restoreField } from './ui-restore.js';
 
 const VIEWS = { cases: renderCases, runs: renderRuns };
 
-let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], defect: null, log: '', bootError: null, showClosed: false, confirmClose: null, help: false, scrollToSelected: false };
+let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], historyLoaded: false, defect: null, log: '', bootError: null, showClosed: false, confirmClose: null, help: false, scrollToSelected: false };
 const root = document.getElementById('root');
 const overlayRoot = document.getElementById('overlay-root');
 const toastEl = document.getElementById('toast');
@@ -41,12 +41,12 @@ async function loadCases() {
 // that resolves after a newer one cannot overwrite the newer answer.
 async function selectCase(id) {
   const token = ++selectCase.token;
-  setState({ selectedId: id, history: [], defect: null, log: '', scrollToSelected: true });
+  setState({ selectedId: id, history: [], historyLoaded: false, defect: null, log: '', scrollToSelected: true });
   if (!id) return;
   const history = await api.get(`/api/cases/${encodeURIComponent(id)}/history`);
   const defect = state.run ? await findDefect(state.run.id, id) : null;
   if (token !== selectCase.token) return;
-  setState({ history, defect });
+  setState({ history, historyLoaded: true, defect });
 }
 selectCase.token = 0;
 
@@ -87,7 +87,7 @@ async function record(caseId, patch) {
 // with fewer than two entries there is nothing earlier to go back to.
 async function undo(caseId) {
   if (!caseId || !state.run) return;
-  const history = state.history.length ? state.history : await api.get(`/api/cases/${encodeURIComponent(caseId)}/history`);
+  const history = state.historyLoaded ? state.history : await api.get(`/api/cases/${encodeURIComponent(caseId)}/history`);
   const entries = history.filter((h) => h.runId === state.run.id);
   if (entries.length < 2) { toast('Nothing to undo for this case in this run.'); return; }
   const previous = entries[entries.length - 2];
