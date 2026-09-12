@@ -120,6 +120,17 @@ test('an open PR on the branch means pr-open, regardless of exit code', async ()
   assert.deepEqual(s.execCalls[0].args.slice(0, 4), ['pr', 'list', '--head', 'qa/17']);
 });
 
+test('a failure reported only on stderr still surfaces as the last log line', async () => {
+  const s = await setup();
+  await s.dispatcher.enqueue('D-0001');
+  s.children[0].stderr.emit('data', Buffer.from('step one\nblocked: cannot reproduce\n'));
+  endChild(s.children[0], 1);
+  await settled(s.dispatcher);
+  const d = await getDefect(s.paths, 'D-0001');
+  assert.equal(d.dispatch.state, 'failed');
+  assert.match(d.dispatch.error, /Last output: blocked: cannot reproduce/);
+});
+
 test('no PR means failed with the last log line as the error', async () => {
   const s = await setup();
   await s.dispatcher.enqueue('D-0001');
