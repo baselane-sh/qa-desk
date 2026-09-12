@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { guessProject, guessComponents, writeStarterConfig } from '../scripts/init.mjs';
@@ -42,4 +42,15 @@ test('writeStarterConfig falls back to one component when the repo has no source
   const root = await mkdtemp(join(tmpdir(), 'init-empty-'));
   const { config } = await writeStarterConfig({ repoRoot: root, agent: 'claude' });
   assert.deepEqual(config.components.map((c) => c.name), ['app']);
+});
+
+test('writeStarterConfig adds .qa-desk/logs/ to the repo gitignore once', async () => {
+  const root = await fakeRepo('gi');
+  await writeFile(join(root, '.gitignore'), 'node_modules/\n');
+  await writeStarterConfig({ repoRoot: root, agent: 'claude' });
+  const text = await readFile(join(root, '.gitignore'), 'utf8');
+  assert.equal(text, 'node_modules/\n.qa-desk/logs/\n');
+  await rm(join(root, '.qa-desk'), { recursive: true });
+  await writeStarterConfig({ repoRoot: root, agent: 'claude' });
+  assert.equal(await readFile(join(root, '.gitignore'), 'utf8'), 'node_modules/\n.qa-desk/logs/\n');
 });
