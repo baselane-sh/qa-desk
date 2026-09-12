@@ -16,6 +16,10 @@ export function statusOf(c) {
   return c.execution?.status ?? 'untested';
 }
 
+export function runBadges(c) {
+  return Object.entries(c.latestByRun ?? {}).map(([runId, execution]) => ({ runId, status: execution?.status ?? 'untested' }));
+}
+
 export function matchesFilters(c, f) {
   for (const key of ['component', 'type', 'priority', 'severity', 'env', 'locale', 'automation']) {
     if (f[key] && c[key] !== f[key]) return false;
@@ -68,11 +72,15 @@ export function renderProgress(state, groupKey = 'component') {
 
 export function renderList(state, actions, cases) {
   if (!cases.length) return el('p', { class: 'empty', text: 'No cases match' });
-  return el('ul', { class: 'list' }, cases.map((c) => el('li', { 'data-id': c.id, class: c.id === state.selectedId ? 'selected' : '', onclick: () => actions.select(c.id) }, [
-    el('span', { text: `${c.id} ${c.title}` }),
-    el('span', { class: `status ${statusOf(c)}`, text: statusOf(c) }),
-    el('span', { class: 'meta', text: [c.component, c.priority, c.severity, c.type, ...(c.actors ?? [])].join(' · ') }),
-  ])));
+  return el('ul', { class: 'list' }, cases.map((c) => {
+    const badges = runBadges(c);
+    return el('li', { 'data-id': c.id, class: c.id === state.selectedId ? 'selected' : '', onclick: () => actions.select(c.id) }, [
+      el('span', { text: `${c.id} ${c.title}` }),
+      el('span', { class: `status ${statusOf(c)}`, text: statusOf(c) }),
+      el('span', { class: 'meta', text: [c.component, c.priority, c.severity, c.type, ...(c.actors ?? [])].join(' · ') }),
+      badges.length ? el('span', { class: 'meta' }, badges.map((b) => el('span', { class: `status ${b.status}`, title: b.runId, text: `${b.runId} ${b.status}` }))) : null,
+    ]);
+  }));
 }
 
 function kv(pairs) {

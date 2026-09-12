@@ -239,3 +239,23 @@ test('runs carry a status summary in the list and in the detail', async (t) => {
   assert.equal(one.body.data.summary.executed, 1);
   assert.equal(one.body.data.executions['QA-0001'].status, 'passed');
 });
+
+test('GET /api/cases attaches the latest execution per open run and drops closed runs', async () => {
+  const s = await boot();
+  await makeRun(s, ['QA-0001']);
+  await makeRun(s, ['QA-0001', 'QA-0002']);
+  await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'passed' });
+  const before = (await s.call('GET', '/api/cases')).body.data;
+  assert.deepEqual(Object.keys(before[0].latestByRun), ['R-0001', 'R-0002']);
+  assert.equal(before[0].latestByRun['R-0001'].status, 'passed');
+  assert.equal(before[0].latestByRun['R-0002'], null);
+  assert.deepEqual(Object.keys(before[1].latestByRun), ['R-0002']);
+  assert.equal(before[0].execution, undefined);
+  await s.call('POST', '/api/runs/R-0001/close');
+  const after = (await s.call('GET', '/api/cases')).body.data;
+  assert.deepEqual(Object.keys(after[0].latestByRun), ['R-0002']);
+  const inRun = (await s.call('GET', '/api/cases?runId=R-0002')).body.data;
+  assert.equal(inRun[0].latestByRun, undefined);
+  assert.equal(inRun[0].execution, null);
+  await s.close();
+});

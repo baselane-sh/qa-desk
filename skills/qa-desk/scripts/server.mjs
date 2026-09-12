@@ -102,10 +102,23 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
     return d;
   }
 
+  /** The Cases view shows where a case stands in every run still open. */
+  async function attachOpenRuns(cases) {
+    const open = (await listRuns(paths)).filter((r) => !r.closedAt);
+    const perRun = await Promise.all(open.map((r) => listExecutions(paths, r.id)));
+    return cases.map((c) => {
+      const latestByRun = {};
+      open.forEach((run, i) => {
+        if (run.caseIds.includes(c.id)) latestByRun[run.id] = perRun[i].get(c.id) ?? null;
+      });
+      return { ...c, latestByRun };
+    });
+  }
+
   async function casesRoute(url) {
     const cases = await loadCases();
     const runId = url.searchParams.get('runId');
-    if (!runId) return cases;
+    if (!runId) return attachOpenRuns(cases);
     await loadRun(runId);
     const latest = await listExecutions(paths, runId);
     const defects = new Map((await listDefects(paths)).filter((d) => d.runId === runId).map((d) => [d.caseId, d.id]));

@@ -44,6 +44,16 @@ test('matchesFilters filters by every config list and by text', async () => {
   assert.equal(matchesFilters({ ...c, execution: { status: 'failed' } }, { status: 'untested' }), false);
 });
 
+test('runBadges lists one badge per open run and calls a missing execution untested', async () => {
+  const { runBadges } = await import('../public/views/cases.js');
+  assert.deepEqual(runBadges({ id: 'QA-0001' }), []);
+  assert.deepEqual(runBadges({ id: 'QA-0001', latestByRun: {} }), []);
+  assert.deepEqual(runBadges({ id: 'QA-0001', latestByRun: { 'R-0002': { status: 'failed' }, 'R-0003': null } }), [
+    { runId: 'R-0002', status: 'failed' },
+    { runId: 'R-0003', status: 'untested' },
+  ]);
+});
+
 test('keyToStatus ignores a key held with a modifier and maps a bare key to its status', async () => {
   const { keyToStatus } = await import('../public/keys.js');
   assert.equal(keyToStatus({ key: 'p', metaKey: true }), null);
