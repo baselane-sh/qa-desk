@@ -81,6 +81,19 @@ test('runs: create, list, get, execution, cases with runId, history', async () =
   await s.close();
 });
 
+test('an execution with no status is rejected until one exists, then a status-free patch is fine', async () => {
+  const s = await boot();
+  await makeRun(s);
+  assert.equal((await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', {})).status, 400);
+  assert.equal((await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { actual: 'still setting up' })).status, 400);
+  const first = await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'failed' });
+  assert.equal(first.status, 200);
+  const second = await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { actual: 'more detail' });
+  assert.equal(second.status, 200);
+  assert.equal(second.body.data.status, 'failed');
+  await s.close();
+});
+
 test('defects: needs a failed or blocked execution, creates once, shows with issue, dispatches', async () => {
   const created = [];
   const s = await boot({ tracker: { name: 'github', create: async (x) => { created.push(x); return { id: '17', url: 'https://github.com/o/r/issues/17' }; }, show: async () => ({ id: '17', url: 'u', state: 'open', notes: 'n' }) } });

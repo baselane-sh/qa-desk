@@ -36,6 +36,14 @@ test('recordExecution merges over the previous execution and history keeps every
   assert.equal((await caseHistory(p, 'QA-0001')).length, 2);
 });
 
+test('recordExecution serialises overlapping read-modify-append so no field is lost', async () => {
+  const p = await paths();
+  const run = await createRun(p, input, { now });
+  await Promise.all(Array.from({ length: 10 }, (_, i) => recordExecution(p, { runId: run.id, caseId: 'QA-0001', status: 'retest', [`f${i}`]: i }, { now, executedBy: 'mo' })));
+  const latest = (await listExecutions(p, run.id)).get('QA-0001');
+  for (let i = 0; i < 10; i += 1) assert.equal(latest[`f${i}`], i, `field f${i} was lost to a concurrent write`);
+});
+
 test('recordExecution refuses an unknown run or a case outside the run', async () => {
   const p = await paths();
   await createRun(p, input, { now });

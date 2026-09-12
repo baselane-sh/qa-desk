@@ -79,10 +79,30 @@ test('enqueue spawns the config argv with placeholders filled, no shell, strippe
   assert.equal(s.dispatcher.current(), 'D-0001');
 });
 
-test('a second enqueue while running is refused', async () => {
+test('a second enqueue while running is queued, then starts once the first finishes', async () => {
   const s = await setup();
+  const second = await createDefect(s.paths, { runId: 'R-0001', caseId: 'QA-0002', tracker: 'github', issueId: '18', url: 'u' }, { now });
   await s.dispatcher.enqueue('D-0001');
-  await assert.rejects(s.dispatcher.enqueue('D-0001'), /already running/);
+  const queued = await s.dispatcher.enqueue(second.id);
+  assert.deepEqual(queued, { state: 'queued' });
+  assert.equal((await getDefect(s.paths, second.id)).dispatch.state, 'queued');
+  assert.equal(s.children.length, 1, 'the second dispatch must not spawn while the first is running');
+  assert.equal(s.dispatcher.current(), 'D-0001');
+
+  endChild(s.children[0], 0);
+  const deadline = Date.now() + 3000;
+  let secondDefect = await getDefect(s.paths, second.id);
+  while (secondDefect.dispatch.state !== 'running') {
+    if (Date.now() > deadline) throw new Error(`the queued dispatch never started (state: ${secondDefect.dispatch.state})`);
+    await new Promise((r) => setTimeout(r, 5));
+    secondDefect = await getDefect(s.paths, second.id);
+  }
+  assert.equal(s.children.length, 2);
+  assert.equal(s.children[1].cmd, 'claude');
+  assert.equal(s.dispatcher.current(), second.id);
+
+  endChild(s.children[1], 0);
+  await settled(s.dispatcher);
 });
 
 test('an open PR on the branch means pr-open, regardless of exit code', async () => {
@@ -140,6 +160,35 @@ test('recoverOnStart fails dead running defects and adopts live ones', async () 
   assert.deepEqual(dead, ['D-0001']);
   assert.equal((await getDefect(s.paths, 'D-0001')).dispatch.error, 'server restarted');
   assert.equal(s.dispatcher.current(), 'D-0002');
+});
+
+test('an adopted orphan that opened a pull request before it died is reported pr-open, not failed', async () => {
+  let alive = true;
+  const s = await setup({ prUrl: 'https://github.com/o/r/pull/9', isPidAlive: () => alive });
+  const { patchDispatch } = await import('../scripts/lib/defects.mjs');
+  await patchDispatch(s.paths, 'D-0001', { state: 'running', pid: 555, branch: 'qa/17' });
+  const dead = await s.dispatcher.recoverOnStart();
+  assert.deepEqual(dead, []);
+  assert.equal(s.dispatcher.current(), 'D-0001');
+  alive = false;
+  await settled(s.dispatcher);
+  const d = await getDefect(s.paths, 'D-0001');
+  assert.equal(d.dispatch.state, 'pr-open');
+  assert.equal(d.dispatch.pr, 'https://github.com/o/r/pull/9');
+  assert.equal(d.dispatch.error, null);
+});
+
+test('an adopted orphan with no pull request keeps the orphan wording, not the generic no-output message', async () => {
+  let alive = true;
+  const s = await setup({ isPidAlive: () => alive });
+  const { patchDispatch } = await import('../scripts/lib/defects.mjs');
+  await patchDispatch(s.paths, 'D-0001', { state: 'running', pid: 555, branch: 'qa/17' });
+  await s.dispatcher.recoverOnStart();
+  alive = false;
+  await settled(s.dispatcher);
+  const d = await getDefect(s.paths, 'D-0001');
+  assert.equal(d.dispatch.state, 'failed');
+  assert.equal(d.dispatch.error, 'orphaned by restart, check the issue');
 });
 
 test('enqueue refuses an issue id that is not a plain identifier', async () => {

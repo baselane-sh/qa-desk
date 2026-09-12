@@ -123,11 +123,13 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
   async function executionRoute(req, runId, caseId) {
     const v = validateExecutionPatch(await readBody(req), config);
     if (!v.ok) throw new HttpError(400, v.error);
-    try { return await recordExecution(paths, { runId, caseId, ...v.value }, { executedBy }); } catch (err) {
-      if (/unknown run/.test(err.message)) throw new HttpError(404, err.message);
-      if (/is not in run/.test(err.message)) throw new HttpError(400, err.message);
-      throw err;
-    }
+    const run = await loadRun(runId);
+    if (!run.caseIds.includes(caseId)) throw new HttpError(400, `case ${caseId} is not in run ${runId}`);
+    const previous = (await listExecutions(paths, runId)).get(caseId);
+    // untested is the absence of a record, not a record with no status: a status-free row
+    // would otherwise be counted as executed by coverage and reports.
+    if (!previous && v.value.status === undefined) throw new HttpError(400, 'status is required for the first execution of a case');
+    return recordExecution(paths, { runId, caseId, ...v.value }, { executedBy });
   }
 
   async function createDefectRoute(req) {

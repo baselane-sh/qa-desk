@@ -27,6 +27,16 @@ test('guessComponents lists source directories and skips tooling directories', a
   assert.deepEqual(comps[0], { name: 'lib', sources: [], notes: '' });
 });
 
+test('guessComponents sanitizes names starting with punctuation and de-duplicates collisions', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'init-'));
+  const root = join(base, 'weird');
+  for (const d of ['_internal', 'my_app', 'my.app', '+native']) await mkdir(join(root, d), { recursive: true });
+  const comps = await guessComponents(root);
+  assert.deepEqual(comps.map((c) => c.name), ['internal', 'my-app', 'my-app-2', 'native']);
+  // Every resulting name must still satisfy the config's own component name rule.
+  for (const c of comps) assert.match(c.name, /^[a-z0-9][a-z0-9-]*$/);
+});
+
 test('writeStarterConfig writes a valid config and refuses to overwrite', async () => {
   const root = await fakeRepo();
   const { path, config } = await writeStarterConfig({ repoRoot: root, agent: 'codex' });

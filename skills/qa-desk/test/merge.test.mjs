@@ -30,9 +30,20 @@ test('mergeOutputs validates, allocates ids, writes cases and coverage, removes 
   assert.equal(cases.length, 2);
   const cov = await readJson(p.coverage, null);
   assert.deepEqual(cov.uncovered, ['src/auth/otp.ts']);
-  assert.deepEqual(await readdir(p.generateOut), []);
+  assert.deepEqual(await readdir(p.generateOut), ['auth.json.rejected.json']);
+  assert.deepEqual(await readJson(join(p.generateOut, 'auth.json.rejected.json'), null), [{ title: 'broken' }]);
   assert.match(formatMergeReport(r), /added 2, updated 0, invalid 1, duplicates 0, uncovered 1/);
   assert.match(formatMergeReport(r), /INVALID auth.json\[1\]/);
+});
+
+test('mergeOutputs keeps the invalid case from a partially valid file readable in a .rejected.json instead of deleting it', async () => {
+  const { root, p } = await repo();
+  const bad = { title: 'broken', component: 'auth', type: 'nope' };
+  await writeFile(join(p.generateOut, 'auth.json'), JSON.stringify([stripId(sampleCase()), bad]));
+  const r = await mergeOutputs({ repoRoot: root, config: TEST_CONFIG });
+  assert.deepEqual(r.added, ['QA-0001']);
+  assert.deepEqual(await readdir(p.generateOut), ['auth.json.rejected.json']);
+  assert.deepEqual(await readJson(join(p.generateOut, 'auth.json.rejected.json'), null), [bad]);
 });
 
 test('mergeOutputs keeps invalid files in place when nothing was valid', async () => {

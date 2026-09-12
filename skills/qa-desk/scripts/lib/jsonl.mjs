@@ -19,16 +19,42 @@ export async function readJsonl(path, { warn = defaultWarn } = {}) {
 
 const queues = new Map();
 
-export function appendJsonl(path, record) {
+/**
+ * Serialise an arbitrary read-modify-write cycle on one JSONL path across
+ * every caller in the process, the same guarantee store.mjs's mutateJson
+ * gives JSON files. Without this, two overlapping "read the latest record,
+ * merge a patch, append" calls can both read the same base record and the
+ * second append silently discards fields the first one wrote (latest wins
+ * on read). `fn` runs only once the previous queued operation on this path
+ * has settled, so append order matches call order, not read timing.
+ */
+export function withJsonlQueue(path, fn) {
   const previous = queues.get(path) ?? Promise.resolve();
-  const run = previous.then(async () => {
-    await mkdir(dirname(path), { recursive: true });
-    await appendFile(path, JSON.stringify(record) + '\n', 'utf8');
-  });
+  const run = previous.then(fn);
   const settled = run.then(() => {}, () => {});
   queues.set(path, settled);
   settled.then(() => { if (queues.get(path) === settled) queues.delete(path); });
   return run;
+}
+
+async function writeLine(path, record) {
+  await mkdir(dirname(path), { recursive: true });
+  await appendFile(path, JSON.stringify(record) + '\n', 'utf8');
+}
+
+/**
+ * A single queued append. Call this from outside an existing withJsonlQueue
+ * callback; calling it from inside one for the same path would deadlock,
+ * since it would wait for that very callback to finish. A caller doing its
+ * own read-modify-write should call writeJsonlLine directly instead.
+ */
+export function appendJsonl(path, record) {
+  return withJsonlQueue(path, () => writeLine(path, record));
+}
+
+/** The unqueued write, for use inside a withJsonlQueue(path, ...) callback. */
+export function writeJsonlLine(path, record) {
+  return writeLine(path, record);
 }
 
 export function latestBy(records, keyFn) {

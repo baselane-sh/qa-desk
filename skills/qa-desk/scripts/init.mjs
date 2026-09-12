@@ -13,13 +13,34 @@ export function guessProject(repoRoot) {
   return withLetterFirst || 'QA';
 }
 
+/**
+ * A directory name is not always a valid component name: it can start with
+ * an underscore, a dot or a plus (`_internal`, `.config`, `+native`), which
+ * the naive char-class replace turns into a leading dash that the component
+ * regex then rejects outright, failing `init` on an ordinary repo layout.
+ */
+function slugifyComponent(name) {
+  const dashed = name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-');
+  return dashed.replace(/^-+/, '') || 'x';
+}
+
+/** Distinct directory names can collapse to the same slug (`my_app`, `my.app`). Keep every one unique with a numeric suffix rather than let config validation fail on the collision. */
+function dedupeNames(names) {
+  const seen = new Map();
+  return names.map((name) => {
+    const count = (seen.get(name) ?? 0) + 1;
+    seen.set(name, count);
+    return count === 1 ? name : `${name}-${count}`;
+  });
+}
+
 export async function guessComponents(repoRoot) {
   const entries = await readdir(repoRoot, { withFileTypes: true });
-  return entries
+  const names = entries
     .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !SKIP_DIRS.has(e.name))
-    .map((e) => e.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'))
-    .sort()
-    .map((name) => ({ name, sources: [], notes: '' }));
+    .map((e) => slugifyComponent(e.name))
+    .sort();
+  return dedupeNames(names).map((name) => ({ name, sources: [], notes: '' }));
 }
 
 async function exists(path) {

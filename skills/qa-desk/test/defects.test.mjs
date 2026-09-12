@@ -30,3 +30,15 @@ test('patchDefect and patchDispatch append and latest wins', async () => {
   assert.equal((await getDefect(p, 'D-0001')).url, 'https://x');
   await assert.rejects(patchDefect(p, 'D-0009', {}), /unknown defect D-0009/);
 });
+
+test('patchDefect and patchDispatch serialise overlapping read-modify-append so no field is lost', async () => {
+  const p = await paths();
+  await createDefect(p, { runId: 'R-0001', caseId: 'QA-0001', tracker: 'github', issueId: '17', url: null }, { now });
+  await Promise.all(Array.from({ length: 10 }, (_, i) => patchDefect(p, 'D-0001', { [`f${i}`]: i })));
+  const d = await getDefect(p, 'D-0001');
+  for (let i = 0; i < 10; i += 1) assert.equal(d[`f${i}`], i, `field f${i} was lost to a concurrent patch`);
+
+  await Promise.all(Array.from({ length: 10 }, (_, i) => patchDispatch(p, 'D-0001', { [`g${i}`]: i })));
+  const withDispatch = await getDefect(p, 'D-0001');
+  for (let i = 0; i < 10; i += 1) assert.equal(withDispatch.dispatch[`g${i}`], i, `dispatch field g${i} was lost to a concurrent patch`);
+});

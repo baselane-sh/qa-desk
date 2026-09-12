@@ -1,4 +1,4 @@
-import { readJsonl, appendJsonl, latestBy } from './jsonl.mjs';
+import { readJsonl, appendJsonl, latestBy, withJsonlQueue, writeJsonlLine } from './jsonl.mjs';
 
 const PAD = 4;
 const RUN_PREFIX = 'R-';
@@ -40,8 +40,10 @@ export async function recordExecution(paths, { runId, caseId, ...patch }, { now 
   const run = await getRun(paths, runId);
   if (!run) throw new Error(`unknown run ${runId}`);
   if (!run.caseIds.includes(caseId)) throw new Error(`case ${caseId} is not in run ${runId}`);
-  const previous = (await listExecutions(paths, runId)).get(caseId) ?? {};
-  const execution = { ...previous, runId, caseId, env: previous.env ?? run.env, locale: previous.locale ?? run.locale, ...patch, executedBy, executedAt: now() };
-  await appendJsonl(paths.executions, execution);
-  return execution;
+  return withJsonlQueue(paths.executions, async () => {
+    const previous = (await listExecutions(paths, runId)).get(caseId) ?? {};
+    const execution = { ...previous, runId, caseId, env: previous.env ?? run.env, locale: previous.locale ?? run.locale, ...patch, executedBy, executedAt: now() };
+    await writeJsonlLine(paths.executions, execution);
+    return execution;
+  });
 }

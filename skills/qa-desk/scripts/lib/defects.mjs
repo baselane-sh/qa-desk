@@ -1,4 +1,4 @@
-import { readJsonl, appendJsonl, latestBy } from './jsonl.mjs';
+import { readJsonl, appendJsonl, latestBy, withJsonlQueue, writeJsonlLine } from './jsonl.mjs';
 
 const PAD = 4;
 const PREFIX = 'D-';
@@ -28,15 +28,21 @@ export async function createDefect(paths, { runId, caseId, tracker, issueId, url
 }
 
 export async function patchDefect(paths, id, patch) {
-  const current = await getDefect(paths, id);
-  if (!current) throw new Error(`unknown defect ${id}`);
-  const next = { ...current, ...patch };
-  await appendJsonl(paths.defects, next);
-  return next;
+  return withJsonlQueue(paths.defects, async () => {
+    const current = await getDefect(paths, id);
+    if (!current) throw new Error(`unknown defect ${id}`);
+    const next = { ...current, ...patch };
+    await writeJsonlLine(paths.defects, next);
+    return next;
+  });
 }
 
 export async function patchDispatch(paths, id, dispatchPatch) {
-  const current = await getDefect(paths, id);
-  if (!current) throw new Error(`unknown defect ${id}`);
-  return patchDefect(paths, id, { dispatch: { ...(current.dispatch ?? {}), ...dispatchPatch } });
+  return withJsonlQueue(paths.defects, async () => {
+    const current = await getDefect(paths, id);
+    if (!current) throw new Error(`unknown defect ${id}`);
+    const next = { ...current, dispatch: { ...(current.dispatch ?? {}), ...dispatchPatch } };
+    await writeJsonlLine(paths.defects, next);
+    return next;
+  });
 }

@@ -8,6 +8,12 @@ export function execFileWithInput(cmd, args, opts = {}) {
       if (err) return reject(Object.assign(err, { stdout, stderr }));
       resolve({ stdout, stderr });
     });
-    if (child.stdin) { if (input !== undefined) child.stdin.end(input); else child.stdin.end(); }
+    if (child.stdin) {
+      // A child that exits without reading stdin makes the pipe emit an
+      // unhandled 'error' (EPIPE), which otherwise crashes the whole
+      // process. The callback above already reports the real failure.
+      child.stdin.on('error', () => {});
+      if (input !== undefined) child.stdin.end(input); else child.stdin.end();
+    }
   });
 }

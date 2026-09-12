@@ -14,14 +14,15 @@ async function listOutFiles(outDir) {
 }
 
 function collect(file, items, config, incoming, invalid) {
-  if (!Array.isArray(items)) { invalid.push({ file, index: null, title: null, problems: ['file must contain an array'] }); return false; }
+  if (!Array.isArray(items)) { invalid.push({ file, index: null, title: null, problems: ['file must contain an array'] }); return { anyValid: false, rejected: [] }; }
   let anyValid = false;
+  const rejected = [];
   items.forEach((item, index) => {
     const problems = validateCase({ ...item, id: `${config.project}-0` }, config);
-    if (problems.length) invalid.push({ file, index, title: item?.title ?? null, problems });
+    if (problems.length) { invalid.push({ file, index, title: item?.title ?? null, problems }); rejected.push(item); }
     else { incoming.push(item); anyValid = true; }
   });
-  return anyValid;
+  return { anyValid, rejected };
 }
 
 export async function mergeOutputs({ repoRoot, config }) {
@@ -30,6 +31,7 @@ export async function mergeOutputs({ repoRoot, config }) {
   const incoming = [];
   const invalid = [];
   const consumed = [];
+  const rejectedByFile = new Map();
   for (const f of files) {
     let items;
     try { items = await readJson(join(p.generateOut, f), null); } catch (err) {
@@ -37,7 +39,11 @@ export async function mergeOutputs({ repoRoot, config }) {
       invalid.push({ file: f, index: null, title: null, problems: ['file is not valid JSON'] });
       continue;
     }
-    if (collect(f, items, config, incoming, invalid)) consumed.push(f);
+    const { anyValid, rejected } = collect(f, items, config, incoming, invalid);
+    if (anyValid) {
+      consumed.push(f);
+      if (rejected.length) rejectedByFile.set(f, rejected);
+    }
   }
   const existing = await readJson(p.cases, []);
   const { cases, added, updated, duplicates } = allocateIds(existing, incoming, config.project);
@@ -45,8 +51,15 @@ export async function mergeOutputs({ repoRoot, config }) {
   await writeJsonAtomic(p.cases, cases);
   const { uncovered, counts, byComponent } = computeCoverage(config, cases);
   await writeJsonAtomic(p.coverage, { generatedAt: new Date().toISOString(), uncovered, counts, byComponent });
-  // A file is removed only once its valid cases are in cases.json, so a crash never loses agent output.
-  for (const f of consumed) await unlink(join(p.generateOut, f));
+  // A file is removed only once its valid cases are in cases.json, so a crash never loses agent
+  // output. When a file was only partly valid, its invalid entries are written to
+  // "<file>.rejected.json" beside it before the original is unlinked, so a partially valid
+  // file never silently loses the cases that failed validation either.
+  for (const f of consumed) {
+    const rejected = rejectedByFile.get(f);
+    if (rejected) await writeJsonAtomic(join(p.generateOut, `${f}.rejected.json`), rejected);
+    await unlink(join(p.generateOut, f));
+  }
   return { added, updated, invalid, duplicates, uncovered };
 }
 
