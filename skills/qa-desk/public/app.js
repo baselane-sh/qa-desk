@@ -53,12 +53,20 @@ async function selectRun(run) {
   await loadCases();
 }
 
+let recordToken = 0;
+
+// Two records on the same case inside one round trip can otherwise resolve out of order,
+// with the older response landing last and overwriting the newer one. A token per call, and
+// computing cases only once every await has settled, means a response that is no longer the
+// most recent call is dropped instead of applied.
 async function record(caseId, patch) {
   if (!state.run) { toast('Create or pick a run first', true); return; }
   if (state.run.closedAt) { toast('This run is closed', true); return; }
+  const token = ++recordToken;
   const execution = await api.put(`/api/runs/${encodeURIComponent(state.run.id)}/executions/${encodeURIComponent(caseId)}`, patch);
-  const cases = state.cases.map((c) => (c.id === caseId ? { ...c, execution } : c));
   const history = state.selectedId === caseId ? await api.get(`/api/cases/${encodeURIComponent(caseId)}/history`) : state.history;
+  if (token !== recordToken) return;
+  const cases = state.cases.map((c) => (c.id === caseId ? { ...c, execution } : c));
   setState({ cases, history });
 }
 

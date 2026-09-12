@@ -34,6 +34,21 @@ export function summaryLabel(summary) {
   return summary ? `${summary.executed} of ${summary.total} done` : '';
 }
 
+/**
+ * countStatuses(cases) only sees cases still in cases.json, so if a case id in the run's
+ * frozen list has since been removed the total it derives falls short of run.summary.total
+ * (scripts/lib/runs.mjs, counted straight from caseIds) and the header disagrees with the
+ * run list badge. Folding in run.summary.total, and counting the gap as untested, keeps the
+ * two totals in step and treats a missing case the same way the server already does.
+ */
+export function headerSummary(counted, runSummary) {
+  if (!runSummary) return counted;
+  const missing = runSummary.total - counted.total;
+  if (missing <= 0) return { ...counted, total: runSummary.total };
+  const counts = { ...counted.counts, untested: counted.counts.untested + missing };
+  return { total: runSummary.total, executed: runSummary.total - counts.untested, counts };
+}
+
 export function defectHint(status) {
   return DEFECT_STATUSES.includes(status) ? null : 'Needs a failed or blocked execution';
 }
@@ -106,6 +121,7 @@ function closedExecutionPanel(c, state) {
     el('p', {}, [el('span', { class: `status ${statusOf(c)}`, text: statusOf(c) })]),
     el('p', { class: 'muted', text: 'This run is closed. Its executions cannot be changed.' }),
     execution?.actual ? el('div', {}, [el('h4', { text: 'Actual result' }), el('pre', { class: 'quote', text: execution.actual })]) : null,
+    execution?.evidence ? el('div', {}, [el('h4', { text: 'Evidence' }), el('pre', { class: 'quote', text: execution.evidence })]) : null,
   ]);
 }
 
@@ -184,7 +200,7 @@ export function renderRuns(root, state, actions) {
   const right = selected
     ? [renderCaseDetail(selected, state), panelFor(selected), defectPanel(selected, state, actions)]
     : [renderProgress(state), ...(state.config.roles.length ? [el('h2', { text: 'By role' }), renderProgress(state, 'role')] : []), el('p', { class: 'empty', text: 'Select a case. Keys: j/k move, p f b s r record.' })];
-  const summary = countStatuses(state.cases.filter((c) => state.run.caseIds.includes(c.id)));
+  const summary = headerSummary(countStatuses(state.cases.filter((c) => state.run.caseIds.includes(c.id))), state.run.summary);
   const controls = el('div', { class: 'pane-head' }, [statusFilter(state, actions), closeControl(state, actions)]);
   const head = el('div', {}, [el('div', { class: 'pane-head' }, [el('h2', { text: `${state.run.name} (${inRun.length})` }), el('span', { class: 'badge', text: summaryLabel(summary) })]), statusStrip(summary), controls]);
   root.append(left, el('section', { class: 'pane' }, [head, renderList(state, actions, inRun)]), el('section', { class: 'pane' }, right));

@@ -48,6 +48,11 @@ the same case. `supersededBy` is honoured wherever cases are read (coverage
 excludes a case that carries it) but nothing writes it automatically, so mark
 a case superseded by hand when a rewritten case should replace an old one.
 
+Closing a run freezes its record: no further executions can be added, and the
+portal shows it read-only from then on. Recording an execution can override
+the run's environment or locale for that one case, for when a case needs a
+different setup than the rest of the run.
+
 ## Config reference
 
 | Field | Default | Meaning |

@@ -135,6 +135,20 @@ test('countStatuses derives untested and summaryLabel reads as progress', async 
   assert.equal(summaryLabel(null), '');
 });
 
+test('headerSummary folds run.summary.total in so the header cannot disagree with the run list badge', async () => {
+  const { countStatuses, headerSummary } = await import('../public/views/runs.js');
+  const cases = [{ id: 'QA-0001', execution: { status: 'passed' } }, { id: 'QA-0002' }];
+  const counted = countStatuses(cases);
+  assert.deepEqual(headerSummary(counted, undefined), counted, 'no run summary yet: pass the live count through untouched');
+  assert.deepEqual(headerSummary(counted, { total: 2, executed: 1, counts: counted.counts }), { ...counted, total: 2 });
+  // QA-0003 is in the run's frozen caseIds but no longer in cases.json: the server's total (3)
+  // already counts it, and the browser must count the gap as untested rather than drop it.
+  const withMissing = headerSummary(counted, { total: 3, executed: 1, counts: {} });
+  assert.equal(withMissing.total, 3);
+  assert.equal(withMissing.executed, 1);
+  assert.deepEqual(withMissing.counts, { passed: 1, failed: 0, blocked: 0, skipped: 0, retest: 0, untested: 2 });
+});
+
 test('the defect hint appears only while Open as defect is disabled', async () => {
   const { defectHint } = await import('../public/views/runs.js');
   assert.equal(defectHint('failed'), null);
