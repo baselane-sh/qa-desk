@@ -49,7 +49,7 @@ export function matchesFilters(c, f) {
 }
 
 function select(label, key, options, value, onchange) {
-  const s = el('select', { onchange: (e) => onchange(key, e.target.value) }, [el('option', { value: '', text: 'All' }), ...options.map((o) => el('option', { value: o, text: o }))]);
+  const s = el('select', { 'data-focus-key': `filter-${key}`, onchange: (e) => onchange(key, e.target.value) }, [el('option', { value: '', text: 'All' }), ...options.map((o) => el('option', { value: o, text: o }))]);
   s.value = value ?? '';
   return el('label', { text: label }, [s]);
 }
@@ -57,7 +57,7 @@ function select(label, key, options, value, onchange) {
 export function renderFilters(state, actions) {
   const { config, filters } = state;
   const set = (key, value) => actions.setFilters({ ...filters, [key]: value || undefined });
-  const q = el('input', { placeholder: 'Search id, title, objective', value: filters.q ?? '', oninput: (e) => set('q', e.target.value) });
+  const q = el('input', { 'data-focus-key': 'q', placeholder: 'Search id, title, objective', value: filters.q ?? '', oninput: (e) => actions.setSearch(e.target.value) });
   const lists = [
     ['Component', 'component', config.components.map((c) => c.name)],
     ...(config.roles.length ? [['Role', 'role', config.roles]] : []),
@@ -126,9 +126,9 @@ export function renderCases(root, state, actions) {
   const visible = state.cases.filter((c) => !c.supersededBy && matchesFilters(c, state.filters));
   const selected = state.cases.find((c) => c.id === state.selectedId);
   root.append(
-    el('aside', { class: 'pane' }, [el('h2', { text: 'Filters' }), renderFilters(state, actions), el('h2', { text: 'Progress', style: 'margin-top:16px' }), renderProgress(state)]),
-    el('section', { class: 'pane' }, [el('h2', { text: `Cases (${visible.length})` }), renderList(state, actions, visible)]),
-    el('section', { class: 'pane' }, selected ? [renderCaseDetail(selected, state)] : [el('p', { class: 'empty', text: 'Select a case. Keys: j/k move, p f b s r record in the current run.' })]),
+    el('aside', { class: 'pane', 'data-pane': 'filters' }, [el('h2', { text: 'Filters' }), renderFilters(state, actions), el('h2', { text: 'Progress', style: 'margin-top:16px' }), renderProgress(state)]),
+    el('section', { class: 'pane', 'data-pane': 'list' }, [el('h2', { text: `Cases (${visible.length})` }), renderList(state, actions, visible)]),
+    el('section', { class: 'pane', 'data-pane': 'detail' }, selected ? [renderCaseDetail(selected, state)] : [el('p', { class: 'empty', text: 'Select a case. Keys: j/k move, p f b s r record in the current run.' })]),
   );
 }
 
