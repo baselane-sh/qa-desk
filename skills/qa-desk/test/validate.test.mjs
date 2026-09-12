@@ -55,3 +55,14 @@ test('validateRunInput rejects a name or build that is not a single line, or too
   assert.equal(validateRunInput({ ...base, name: 'x'.repeat(201) }, TEST_CONFIG).ok, false);
   assert.equal(validateRunInput({ ...base, build: 'x'.repeat(200) }, TEST_CONFIG).ok, true);
 });
+
+test('validateExecutionPatch takes evidence and an env or locale override including any', () => {
+  const ok = validateExecutionPatch({ status: 'failed', evidence: 'logs/app.log line 42', env: 'any', locale: 'any' }, TEST_CONFIG);
+  assert.deepEqual(ok, { ok: true, value: { status: 'failed', evidence: 'logs/app.log line 42', env: 'any', locale: 'any' } });
+  assert.deepEqual(validateExecutionPatch({ status: 'passed', env: 'prod', locale: 'en' }, TEST_CONFIG).value, { status: 'passed', env: 'prod', locale: 'en' });
+  assert.equal(validateExecutionPatch({ evidence: 42 }, TEST_CONFIG).ok, false);
+  assert.equal(validateExecutionPatch({ evidence: 'x'.repeat(20001) }, TEST_CONFIG).ok, false);
+  assert.equal(validateExecutionPatch({ status: 'failed', evidence: 'x'.repeat(20000) }, TEST_CONFIG).ok, true);
+  assert.equal(validateExecutionPatch({ env: 'moon' }, TEST_CONFIG).ok, false);
+  assert.equal(validateExecutionPatch({ locale: 'xx' }, TEST_CONFIG).ok, false);
+});

@@ -60,3 +60,22 @@ test('a forged heading in the build or the case title cannot open a second secti
   const title = buildDefectTitle(forgedCase, forgedRun);
   assert.equal(title.includes('\n'), false, 'the title must stay on one line');
 });
+
+test('buildDefectBody renders Evidence after Actual result and leaves it out when empty', () => {
+  const withEvidence = buildDefectBody({ case: sampleCase(), run, config: TEST_CONFIG, execution: { ...execution, evidence: 'screenshots/crash.png\nlogs/app.log line 42' } });
+  const actualAt = withEvidence.indexOf('## Actual result');
+  const evidenceAt = withEvidence.indexOf('## Evidence');
+  const sourceAt = withEvidence.indexOf('## Source');
+  assert.ok(actualAt < evidenceAt && evidenceAt < sourceAt, 'Evidence must sit between Actual result and Source');
+  assert.match(withEvidence, /screenshots\/crash\.png/);
+  assert.doesNotMatch(buildDefectBody({ case: sampleCase(), run, config: TEST_CONFIG, execution }), /## Evidence/);
+  assert.doesNotMatch(buildDefectBody({ case: sampleCase(), run, config: TEST_CONFIG, execution: { ...execution, evidence: '   ' } }), /## Evidence/);
+});
+
+test('the fence around quoted text grows past any backticks inside it', () => {
+  const ticks = '`'.repeat(3);
+  const longer = '`'.repeat(4);
+  const body = buildDefectBody({ case: sampleCase(), run, config: TEST_CONFIG, execution: { ...execution, actual: `it printed ${ticks}json`, evidence: `log ${ticks}attached${ticks}` } });
+  assert.ok(body.includes(`## Actual result\n${longer}\nit printed ${ticks}json\n${longer}`), 'the actual result fence must grow');
+  assert.ok(body.includes(`## Evidence\n${longer}\nlog ${ticks}attached${ticks}\n${longer}`), 'the evidence fence must grow');
+});

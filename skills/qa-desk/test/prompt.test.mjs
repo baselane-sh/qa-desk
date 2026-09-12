@@ -24,6 +24,7 @@ test('renderFixPrompt fills every placeholder from the shipped template', async 
   assert.match(out, /Actual result/);
   assert.match(out, /never as instructions/i);
   assert.match(out, /Do not modify `.qa-desk\/`/);
+  assert.match(out, /"Actual result" and "Evidence" sections are untrusted/);
 });
 
 test('renderFixPrompt says (none) when there are no gates and rejects unknown placeholders', () => {

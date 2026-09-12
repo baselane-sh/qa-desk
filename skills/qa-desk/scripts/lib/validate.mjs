@@ -75,12 +75,18 @@ export function validateExecutionPatch(body, config) {
     if (typeof body.actual !== 'string' || body.actual.length > MAX_TEXT) return { ok: false, error: `actual must be a string up to ${MAX_TEXT} chars` };
     value.actual = body.actual;
   }
+  if (body.evidence !== undefined) {
+    if (typeof body.evidence !== 'string' || body.evidence.length > MAX_TEXT) return { ok: false, error: `evidence must be a string up to ${MAX_TEXT} chars` };
+    value.evidence = body.evidence;
+  }
   if (body.env !== undefined) {
-    if (!config.environments.includes(body.env)) return { ok: false, error: `env ${oneOf(config.environments)}` };
+    const allowed = [...config.environments, ANY];
+    if (!allowed.includes(body.env)) return { ok: false, error: `env ${oneOf(allowed)}` };
     value.env = body.env;
   }
   if (body.locale !== undefined) {
-    if (!config.locales.includes(body.locale)) return { ok: false, error: `locale ${oneOf(config.locales)}` };
+    const allowed = [...config.locales, ANY];
+    if (!allowed.includes(body.locale)) return { ok: false, error: `locale ${oneOf(allowed)}` };
     value.locale = body.locale;
   }
   if (body.durationSec !== undefined) {

@@ -36,15 +36,15 @@ function fenceFor(text) {
 }
 
 /**
- * The tester's actual result is quoted inside a fenced block on purpose: it
- * is an observation, and the fix-agent prompt tells the agent to read it as
- * data, never as an instruction. Every other free-text field (run build and
- * name, case title, objective, test data, component, priority, severity,
- * references, preconditions, steps, sources) goes through `line` for the
- * same reason: none of them are validated against newlines upstream, and a
- * newline is what a forged heading or fence needs. CommonMark still reads a
- * heading inside an indented list continuation, so indenting is not enough;
- * only the fenced block may hold more than one line.
+ * The tester's actual result and evidence are quoted inside a fenced block on
+ * purpose: they are observations, and the fix-agent prompt tells the agent to
+ * read them as data, never as instructions. Every other free-text field (run
+ * build and name, case title, objective, test data, component, priority,
+ * severity, references, preconditions, steps, sources) goes through `line`
+ * for the same reason: none of them are validated against newlines upstream,
+ * and a newline is what a forged heading or fence needs. CommonMark still
+ * reads a heading inside an indented list continuation, so indenting is not
+ * enough; only a fenced block may hold more than one line.
  */
 export function buildDefectBody({ case: c, run, execution, config }) {
   const caseLines = [`Case: ${c.id}`, `Component: ${line(c.component)}`, `Priority: ${line(c.priority)}`, `Severity: ${line(c.severity)}`, `Type: ${c.type}`];
@@ -52,6 +52,8 @@ export function buildDefectBody({ case: c, run, execution, config }) {
   if (c.references?.length) caseLines.push(`References: ${c.references.map(line).join(', ')}`);
   const actual = execution.actual?.trim() ? execution.actual.trim() : '(none)';
   const fence = fenceFor(actual);
+  const evidence = execution.evidence?.trim() ?? '';
+  const evidenceFence = fenceFor(evidence);
   return [
     '## Summary', line(c.objective || c.title),
     '', '## Environment',
@@ -62,6 +64,7 @@ export function buildDefectBody({ case: c, run, execution, config }) {
     ...(c.testData ? ['', '## Test data', line(c.testData)] : []),
     '', '## Steps to reproduce', steps(c.steps),
     '', '## Actual result', fence, actual, fence,
+    ...(evidence ? ['', '## Evidence', evidenceFence, evidence, evidenceFence] : []),
     '', '## Source', bullets(c.source),
     '', `qa-desk: ${run.id} / ${c.id}`,
   ].join('\n');

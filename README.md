@@ -74,8 +74,8 @@ real `codex --help`. Check it yourself before the first dispatch.
 
 The server binds 127.0.0.1 and refuses any other Host or Origin. Every child
 process runs with an argv array and no shell. The fix agent runs with broad
-permissions; nothing merges without you. The tester's "Actual result" is
-quoted to the agent as data, never as instructions.
+permissions; nothing merges without you. The tester's "Actual result" and
+"Evidence" are quoted to the agent as data, never as instructions.
 
 The fix agent's prompt (`prompts/fix-agent.md`) tells it to work in its own
 git worktree on its own branch. That is an instruction to the agent, not a

@@ -207,3 +207,21 @@ test('execFileWithInput writes stdin and surfaces stderr on failure', async () =
   assert.equal(out.stdout, 'hello');
   await assert.rejects(execFileWithInput('sh', ['-c', 'echo bad >&2; exit 3'], {}), (e) => /bad/.test(e.stderr));
 });
+
+test('an execution carries evidence and an env override into the defect body', async () => {
+  const created = [];
+  const s = await boot({ tracker: { name: 'github', create: async (x) => { created.push(x); return { id: '21', url: 'https://github.com/o/r/issues/21' }; }, show: async () => ({ id: '21', url: 'u', state: 'open', notes: '' }) } });
+  await makeRun(s);
+  const e = await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'failed', actual: 'boom', evidence: 'logs/app.log line 42', env: 'prod', locale: 'any' });
+  assert.equal(e.status, 200, JSON.stringify(e.body));
+  assert.equal(e.body.data.evidence, 'logs/app.log line 42');
+  assert.equal(e.body.data.env, 'prod');
+  assert.equal(e.body.data.locale, 'any');
+  assert.equal((await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { env: 'moon' })).status, 400);
+  assert.equal((await s.call('POST', '/api/defects', { runId: 'R-0001', caseId: 'QA-0001' })).status, 200);
+  assert.match(created[0].body, /Environment: prod/);
+  assert.match(created[0].body, /Locale: any/);
+  assert.match(created[0].body, /## Evidence\n/);
+  assert.match(created[0].body, /logs\/app\.log line 42/);
+  await s.close();
+});
