@@ -1,6 +1,4 @@
-
-# Beads / Dolt files (added by bd init)
-.dolt/
-*.db
-.beads-credential-key
-.beads/proxieddb/
+node_modules/
+.qa-desk/logs/
+*.tmp
+.DS_Store

@@ -1,0 +1,12 @@
+{
+  "name": "qa-desk",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local manual test management for any repo, driven by your own coding agent. Ships as a skill for Claude Code and Codex.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test 'skills/qa-desk/test/*.test.mjs'"
+  }
+}
