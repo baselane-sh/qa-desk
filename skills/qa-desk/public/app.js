@@ -1,0 +1,127 @@
+import { api } from './api.js';
+import { renderCases } from './views/cases.js';
+import { renderRuns } from './views/runs.js';
+
+const VIEWS = { cases: renderCases, runs: renderRuns };
+const KEY_STATUS = { p: 'passed', f: 'failed', b: 'blocked', s: 'skipped', r: 'retest' };
+
+let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], defect: null, log: '' };
+const root = document.getElementById('root');
+const toastEl = document.getElementById('toast');
+const runBadge = document.getElementById('run-badge');
+
+export function setState(patch) {
+  state = { ...state, ...patch };
+  render();
+}
+
+function toast(message, isError = false) {
+  toastEl.textContent = message;
+  toastEl.hidden = false;
+  toastEl.classList.toggle('error', isError);
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { toastEl.hidden = true; }, isError ? 6000 : 2500);
+}
+
+async function guarded(fn) {
+  try { await fn(); } catch (err) { toast(err.message, true); }
+}
+
+async function loadCases() {
+  const path = state.run ? `/api/cases?runId=${encodeURIComponent(state.run.id)}` : '/api/cases';
+  const cases = await api.get(path);
+  setState({ cases });
+}
+
+async function selectCase(id) {
+  const history = id ? await api.get(`/api/cases/${encodeURIComponent(id)}/history`) : [];
+  const defect = id && state.run ? await findDefect(state.run.id, id) : null;
+  setState({ selectedId: id, history, defect, log: '' });
+}
+
+async function findDefect(runId, caseId) {
+  const c = state.cases.find((x) => x.id === caseId);
+  if (!c?.defectId) return null;
+  try { return await api.get(`/api/defects/${encodeURIComponent(c.defectId)}`); } catch { return null; }
+}
+
+async function selectRun(run) {
+  runBadge.textContent = run ? `${run.name} on ${run.build} (${run.env})` : 'No run selected';
+  runBadge.classList.toggle('muted', !run);
+  setState({ run, selectedId: null, defect: null, log: '' });
+  await loadCases();
+}
+
+async function record(caseId, patch) {
+  if (!state.run) { toast('Create or pick a run first', true); return; }
+  const execution = await api.put(`/api/runs/${encodeURIComponent(state.run.id)}/executions/${encodeURIComponent(caseId)}`, patch);
+  setState({ cases: state.cases.map((c) => (c.id === caseId ? { ...c, execution } : c)) });
+}
+
+async function openDefect(caseId) {
+  const defect = await api.post('/api/defects', { runId: state.run.id, caseId });
+  await loadCases();
+  setState({ defect: await api.get(`/api/defects/${defect.id}`) });
+  toast(`Opened ${defect.id}`);
+}
+
+async function dispatch(defectId) {
+  await api.post(`/api/defects/${encodeURIComponent(defectId)}/dispatch`);
+  toast('Agent dispatched');
+  await refreshDefect(defectId);
+}
+
+async function refreshDefect(defectId) {
+  const defect = await api.get(`/api/defects/${encodeURIComponent(defectId)}`);
+  let log = '';
+  if (defect.dispatch?.log) { try { log = await api.text(`/api/defects/${encodeURIComponent(defectId)}/log`); } catch { log = ''; } }
+  setState({ defect, log });
+}
+
+async function createRun(input) {
+  const run = await api.post('/api/runs', input);
+  const runs = await api.get('/api/runs');
+  setState({ runs, view: 'runs' });
+  await selectRun(run);
+  toast(`Created ${run.id}`);
+}
+
+const actions = {
+  select: (id) => guarded(() => selectCase(id)),
+  setFilters: (filters) => setState({ filters }),
+  record: (caseId, patch) => guarded(() => record(caseId, patch)),
+  openDefect: (caseId) => guarded(() => openDefect(caseId)),
+  dispatch: (defectId) => guarded(() => dispatch(defectId)),
+  refreshDefect: (defectId) => guarded(() => refreshDefect(defectId)),
+  createRun: (input) => guarded(() => createRun(input)),
+  selectRun: (run) => guarded(() => selectRun(run)),
+  setView: (view) => setState({ view }),
+};
+
+function render() {
+  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.view === state.view));
+  root.replaceChildren();
+  VIEWS[state.view](root, state, actions);
+}
+
+function visibleIds() {
+  return [...root.querySelectorAll('.list li[data-id]')].map((li) => li.dataset.id);
+}
+
+function onKey(event) {
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) return;
+  const ids = visibleIds();
+  const i = ids.indexOf(state.selectedId);
+  if (event.key === 'j' && ids.length) actions.select(ids[Math.min(i + 1, ids.length - 1)]);
+  else if (event.key === 'k' && ids.length) actions.select(ids[Math.max(i - 1, 0)]);
+  else if (KEY_STATUS[event.key] && state.selectedId && state.run) actions.record(state.selectedId, { status: KEY_STATUS[event.key] });
+}
+
+document.getElementById('tabs').addEventListener('click', (e) => { if (e.target.dataset.view) actions.setView(e.target.dataset.view); });
+document.addEventListener('keydown', onKey);
+
+guarded(async () => {
+  const [config, runs] = await Promise.all([api.get('/api/config'), api.get('/api/runs')]);
+  setState({ config, runs });
+  await loadCases();
+});

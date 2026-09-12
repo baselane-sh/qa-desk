@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qa-desk</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <strong class="brand">qa-desk</strong>
+  <nav class="tabs" id="tabs">
+    <button data-view="cases" class="active">Cases</button>
+    <button data-view="runs">Runs</button>
+  </nav>
+  <span id="run-badge" class="badge muted">No run selected</span>
+  <span id="toast" class="toast" hidden></span>
+</header>
+<main id="root" class="layout"></main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
