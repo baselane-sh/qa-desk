@@ -5,7 +5,7 @@ import { hasModifier, keyToStatus } from './keys.js';
 
 const VIEWS = { cases: renderCases, runs: renderRuns };
 
-let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], defect: null, log: '', bootError: null };
+let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], defect: null, log: '', bootError: null, showClosed: false, confirmClose: null };
 const root = document.getElementById('root');
 const toastEl = document.getElementById('toast');
 const runBadge = document.getElementById('run-badge');
@@ -48,12 +48,13 @@ async function findDefect(runId, caseId) {
 async function selectRun(run) {
   runBadge.textContent = run ? `${run.name} on ${run.build} (${run.env})` : 'No run selected';
   runBadge.classList.toggle('muted', !run);
-  setState({ run, selectedId: null, defect: null, log: '' });
+  setState({ run, selectedId: null, defect: null, log: '', confirmClose: null });
   await loadCases();
 }
 
 async function record(caseId, patch) {
   if (!state.run) { toast('Create or pick a run first', true); return; }
+  if (state.run.closedAt) { toast('This run is closed', true); return; }
   const execution = await api.put(`/api/runs/${encodeURIComponent(state.run.id)}/executions/${encodeURIComponent(caseId)}`, patch);
   setState({ cases: state.cases.map((c) => (c.id === caseId ? { ...c, execution } : c)) });
 }
@@ -86,6 +87,14 @@ async function createRun(input) {
   toast(`Created ${run.id}`);
 }
 
+async function closeCurrentRun(runId) {
+  const closed = await api.post(`/api/runs/${encodeURIComponent(runId)}/close`);
+  const runs = await api.get('/api/runs');
+  setState({ runs, confirmClose: null });
+  if (state.run?.id === runId) await selectRun(closed);
+  toast(`Closed ${runId}`);
+}
+
 const actions = {
   select: (id) => guarded(() => selectCase(id)),
   setFilters: (filters) => setState({ filters }),
@@ -95,7 +104,11 @@ const actions = {
   refreshDefect: (defectId) => guarded(() => refreshDefect(defectId)),
   createRun: (input) => guarded(() => createRun(input)),
   selectRun: (run) => guarded(() => selectRun(run)),
-  setView: (view) => setState({ view }),
+  askCloseRun: (runId) => setState({ confirmClose: runId }),
+  cancelClose: () => setState({ confirmClose: null }),
+  closeRun: (runId) => guarded(() => closeCurrentRun(runId)),
+  toggleClosed: () => setState({ showClosed: !state.showClosed }),
+  setView: (view) => setState({ view, confirmClose: null }),
 };
 
 function render() {

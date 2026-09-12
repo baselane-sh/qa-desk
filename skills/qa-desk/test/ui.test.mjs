@@ -52,3 +52,26 @@ test('keyToStatus ignores a key held with a modifier and maps a bare key to its 
   assert.equal(keyToStatus({ key: 'p' }), 'passed');
   assert.equal(keyToStatus({ key: 'x' }), null);
 });
+
+test('visibleRuns lists newest first, hides closed runs and keeps the selected one', async () => {
+  const { visibleRuns, isClosed } = await import('../public/views/runs.js');
+  const runs = [
+    { id: 'R-0001', closedAt: '2026-09-12T10:00:00.000Z' },
+    { id: 'R-0002', closedAt: null },
+    { id: 'R-0003', closedAt: '2026-09-12T12:00:00.000Z' },
+  ];
+  assert.equal(isClosed(runs[0]), true);
+  assert.equal(isClosed(runs[1]), false);
+  assert.equal(isClosed(undefined), false);
+  assert.deepEqual(visibleRuns(runs, {}).map((r) => r.id), ['R-0002']);
+  assert.deepEqual(visibleRuns(runs, { showClosed: true }).map((r) => r.id), ['R-0003', 'R-0002', 'R-0001']);
+  assert.deepEqual(visibleRuns(runs, { selectedId: 'R-0001' }).map((r) => r.id), ['R-0002', 'R-0001']);
+  assert.deepEqual(runs.map((r) => r.id), ['R-0001', 'R-0002', 'R-0003']);
+});
+
+test('the UI never opens a browser dialog', async () => {
+  for (const f of FILES.filter((x) => x.endsWith('.js'))) {
+    const text = await read(f);
+    assert.doesNotMatch(text, /\b(?:alert|confirm|prompt)\s*\(/, `${f} opens a browser dialog`);
+  }
+});

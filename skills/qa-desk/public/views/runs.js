@@ -3,6 +3,12 @@ import { el, renderList, renderProgress, renderCaseDetail, matchesFilters, statu
 const STATUSES = ['passed', 'failed', 'blocked', 'skipped', 'retest'];
 const DEFECT_STATUSES = ['failed', 'blocked'];
 
+export const isClosed = (run) => Boolean(run?.closedAt);
+
+export function visibleRuns(runs, { showClosed = false, selectedId = null } = {}) {
+  return [...runs].reverse().filter((r) => showClosed || !isClosed(r) || r.id === selectedId);
+}
+
 function newRunForm(state, actions) {
   const { config } = state;
   const name = el('input', { placeholder: 'Sprint 12 regression' });
@@ -18,11 +24,42 @@ function newRunForm(state, actions) {
 }
 
 function runList(state, actions) {
-  if (!state.runs.length) return el('p', { class: 'empty', text: 'No runs yet' });
-  return el('ul', { class: 'list' }, [...state.runs].reverse().map((r) => el('li', { class: state.run?.id === r.id ? 'selected' : '', onclick: () => actions.selectRun(r) }, [
-    el('span', { text: `${r.id} ${r.name}` }), el('span', { class: 'badge', text: `${r.caseIds.length} cases` }),
+  const toggle = el('input', { type: 'checkbox', onchange: () => actions.toggleClosed() });
+  toggle.checked = Boolean(state.showClosed);
+  const bar = el('label', { class: 'inline', text: 'Show closed' }, [toggle]);
+  const rows = visibleRuns(state.runs, { showClosed: state.showClosed, selectedId: state.run?.id ?? null });
+  if (!rows.length) {
+    return el('div', {}, [bar, el('p', { class: 'empty', text: state.runs.length ? 'Every run is closed' : 'No runs yet' })]);
+  }
+  const items = rows.map((r) => el('li', { class: state.run?.id === r.id ? 'selected' : '', onclick: () => actions.selectRun(r) }, [
+    el('span', { text: `${r.id} ${r.name}` }),
+    isClosed(r) ? el('span', { class: 'badge closed', text: 'Closed' }) : el('span', { class: 'badge', text: `${r.caseIds.length} cases` }),
     el('span', { class: 'meta', text: `${r.build} · ${r.env} · ${r.createdAt.slice(0, 10)}` }),
-  ])));
+  ]));
+  return el('div', {}, [bar, el('ul', { class: 'list' }, items)]);
+}
+
+function closeControl(state, actions) {
+  const run = state.run;
+  if (isClosed(run)) return el('span', { class: 'badge closed', text: 'Closed' });
+  if (state.confirmClose === run.id) {
+    return el('span', { class: 'actions' }, [
+      el('span', { class: 'badge muted', text: 'Close this run? No further executions can be recorded.' }),
+      el('button', { class: 'primary', text: 'Confirm close', onclick: () => actions.closeRun(run.id) }),
+      el('button', { text: 'Cancel', onclick: () => actions.cancelClose() }),
+    ]);
+  }
+  return el('button', { text: 'Close run', onclick: () => actions.askCloseRun(run.id) });
+}
+
+function closedExecutionPanel(c, state) {
+  const execution = c.execution;
+  return el('div', {}, [
+    el('h4', { text: `Execution in ${state.run.id}` }),
+    el('p', {}, [el('span', { class: `status ${statusOf(c)}`, text: statusOf(c) })]),
+    el('p', { class: 'muted', text: 'This run is closed. Its executions cannot be changed.' }),
+    execution?.actual ? el('div', {}, [el('h4', { text: 'Actual result' }), el('pre', { class: 'quote', text: execution.actual })]) : null,
+  ]);
 }
 
 function executionPanel(c, state, actions) {
@@ -67,8 +104,10 @@ export function renderRuns(root, state, actions) {
   }
   const inRun = state.cases.filter((c) => state.run.caseIds.includes(c.id) && matchesFilters(c, state.filters));
   const selected = inRun.find((c) => c.id === state.selectedId);
+  const panelFor = (c) => (isClosed(state.run) ? closedExecutionPanel(c, state) : executionPanel(c, state, actions));
   const right = selected
-    ? [renderCaseDetail(selected, state), executionPanel(selected, state, actions), defectPanel(selected, state, actions)]
+    ? [renderCaseDetail(selected, state), panelFor(selected), defectPanel(selected, state, actions)]
     : [renderProgress(state), ...(state.config.roles.length ? [el('h2', { text: 'By role' }), renderProgress(state, 'role')] : []), el('p', { class: 'empty', text: 'Select a case. Keys: j/k move, p f b s r record.' })];
-  root.append(left, el('section', { class: 'pane' }, [el('h2', { text: `${state.run.name} (${inRun.length})` }), renderList(state, actions, inRun)]), el('section', { class: 'pane' }, right));
+  const head = el('div', { class: 'pane-head' }, [el('h2', { text: `${state.run.name} (${inRun.length})` }), closeControl(state, actions)]);
+  root.append(left, el('section', { class: 'pane' }, [head, renderList(state, actions, inRun)]), el('section', { class: 'pane' }, right));
 }

@@ -44,4 +44,11 @@ pre.log { background: #0f172a; color: #e2e8f0; padding: 10px; border-radius: 6px
 .empty.error { color: var(--fail); }
 .form label { display: block; font-size: 12px; color: var(--muted); margin-top: 8px; }
 .form .row { display: flex; gap: 8px; }
+.pane-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.pane-head h2 { margin: 0; }
+.badge.closed { background: #e5e7eb; color: var(--muted); }
+.muted { color: var(--muted); }
+.inline { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.inline input, .inline select { width: auto; }
+pre.quote { background: #f3f4f6; padding: 8px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; overflow: auto; max-height: 200px; }
 @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; height: auto; } }
