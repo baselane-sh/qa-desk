@@ -156,3 +156,72 @@ test('the defect hint appears only while Open as defect is disabled', async () =
   assert.equal(defectHint('passed'), 'Needs a failed or blocked execution');
   assert.equal(defectHint('untested'), 'Needs a failed or blocked execution');
 });
+
+test('nextIndex clamps at both ends and starts at the top from nothing', async () => {
+  const { nextIndex } = await import('../public/keys.js');
+  assert.equal(nextIndex(10, -1, 1), 0);
+  assert.equal(nextIndex(10, -1, -1), 0);
+  assert.equal(nextIndex(10, 0, -1), 0);
+  assert.equal(nextIndex(10, 9, 1), 9);
+  assert.equal(nextIndex(10, 4, 1), 5);
+  assert.equal(nextIndex(0, -1, 1), -1);
+});
+
+test('keyAction maps every binding and refuses what the context cannot do', async () => {
+  const { keyAction } = await import('../public/keys.js');
+  const ctx = { hasSelection: true, hasRun: true, overlayOpen: false };
+  const ev = (key, extra = {}) => ({ key, target: { tagName: 'BODY' }, ...extra });
+  assert.deepEqual(keyAction(ev('j'), ctx), { type: 'move', delta: 1 });
+  assert.deepEqual(keyAction(ev('ArrowDown'), ctx), { type: 'move', delta: 1 });
+  assert.deepEqual(keyAction(ev('k'), ctx), { type: 'move', delta: -1 });
+  assert.deepEqual(keyAction(ev('ArrowUp'), ctx), { type: 'move', delta: -1 });
+  assert.deepEqual(keyAction(ev('p'), ctx), { type: 'status', status: 'passed' });
+  assert.deepEqual(keyAction(ev('P'), ctx), { type: 'status', status: 'passed' });
+  assert.deepEqual(keyAction(ev('u'), ctx), { type: 'undo' });
+  assert.deepEqual(keyAction(ev('/'), ctx), { type: 'search' });
+  assert.deepEqual(keyAction(ev('?'), ctx), { type: 'help' });
+  assert.deepEqual(keyAction(ev('Enter'), ctx), { type: 'focusField', field: 'actual' });
+  assert.deepEqual(keyAction(ev('Escape'), ctx), { type: 'blur' });
+  // a verdict needs both a case and an open run
+  assert.equal(keyAction(ev('p'), { ...ctx, hasRun: false }), null);
+  assert.equal(keyAction(ev('p'), { ...ctx, hasSelection: false }), null);
+  assert.equal(keyAction(ev('u'), { ...ctx, hasRun: false }), null);
+  // Enter on a real button stays with the button
+  assert.equal(keyAction(ev('Enter', { target: { tagName: 'BUTTON' } }), ctx), null);
+  // every modifier aborts, including on Escape
+  for (const mod of ['metaKey', 'ctrlKey', 'altKey']) {
+    assert.equal(keyAction(ev('j', { [mod]: true }), ctx), null, mod);
+    assert.equal(keyAction(ev('Escape', { [mod]: true }), ctx), null, mod);
+  }
+  // typing in a field blocks everything but Escape
+  for (const tag of ['INPUT', 'TEXTAREA', 'SELECT']) {
+    assert.equal(keyAction(ev('j', { target: { tagName: tag } }), ctx), null, tag);
+    assert.deepEqual(keyAction(ev('Escape', { target: { tagName: tag } }), ctx), { type: 'blur' }, tag);
+  }
+  assert.equal(keyAction(ev('j', { target: { tagName: 'DIV', isContentEditable: true } }), ctx), null);
+  // an open overlay swallows everything but Escape
+  assert.equal(keyAction(ev('j'), { ...ctx, overlayOpen: true }), null);
+  assert.deepEqual(keyAction(ev('Escape'), { ...ctx, overlayOpen: true }), { type: 'blur' });
+  assert.equal(keyAction(ev('x'), ctx), null);
+});
+
+test('debounce runs once after the quiet time and keeps the last arguments', async () => {
+  const { debounce } = await import('../public/keys.js');
+  let timer = null;
+  const setTimer = (fn, ms) => { timer = { fn, ms }; return 1; };
+  const clearTimer = () => { timer = null; };
+  const seen = [];
+  const d = debounce((v) => seen.push(v), 140, setTimer, clearTimer);
+  d('a'); d('b'); d('c');
+  assert.deepEqual(seen, []);
+  assert.equal(timer.ms, 140);
+  timer.fn();
+  assert.deepEqual(seen, ['c']);
+});
+
+test('the key legend in index.html names every bound key', async () => {
+  const html = await read('index.html');
+  for (const k of ['j', 'k', 'p', 'f', 'b', 's', 'r', 'u', 'Enter', 'Esc', '?']) {
+    assert.match(html, new RegExp(`<kbd>${k.replace('?', '\\?')}</kbd>`), `legend is missing ${k}`);
+  }
+});
