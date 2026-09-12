@@ -3,6 +3,7 @@ import { renderCases, el, filterOptions } from './views/cases.js';
 import { renderRuns } from './views/runs.js';
 import { nextIndex, debounce, keyAction } from './keys.js';
 import { loadFilters, saveFilters } from './filters-store.js';
+import { captureField, restoreField } from './ui-restore.js';
 
 const VIEWS = { cases: renderCases, runs: renderRuns };
 
@@ -86,10 +87,11 @@ async function record(caseId, patch) {
 // with fewer than two entries there is nothing earlier to go back to.
 async function undo(caseId) {
   if (!caseId || !state.run) return;
-  const entries = state.history.filter((h) => h.runId === state.run.id);
+  const history = state.history.length ? state.history : await api.get(`/api/cases/${encodeURIComponent(caseId)}/history`);
+  const entries = history.filter((h) => h.runId === state.run.id);
   if (entries.length < 2) { toast('Nothing to undo for this case in this run.'); return; }
   const previous = entries[entries.length - 2];
-  await record(caseId, { status: previous.status, actual: previous.actual, evidence: previous.evidence });
+  await record(caseId, { status: previous.status, actual: previous.actual ?? '', evidence: previous.evidence ?? '' });
 }
 
 async function openDefect(caseId) {
@@ -128,11 +130,20 @@ async function closeCurrentRun(runId) {
   toast(`Closed ${runId}`);
 }
 
+// window.localStorage is a getter that can itself throw (e.g. site data blocked), before
+// filters-store.js's own try/catch around getItem/setItem ever runs. A blocked store must
+// never stop the app from rendering, so the getter is read behind its own guard and a
+// no-op fallback stands in when it is unavailable.
+function storage() {
+  try { return window.localStorage; } catch { return null; }
+}
+const NULL_STORE = { getItem: () => null, setItem() {} };
+
 // Every filter change is persisted, not just the ones made through a select: setFilters
 // covers the selects, and setSearch (below) routes through this too, so the search box
 // sticks across a reload exactly like every other filter.
 function commitFilters(filters) {
-  saveFilters(window.localStorage, filters);
+  saveFilters(storage() ?? NULL_STORE, filters);
   setState({ filters });
 }
 
@@ -167,21 +178,17 @@ const actions = {
 function captureUi() {
   const scroll = {};
   for (const pane of root.querySelectorAll('[data-pane]')) scroll[pane.dataset.pane] = pane.scrollTop;
-  const active = document.activeElement;
-  const key = active?.dataset?.focusKey ?? null;
-  const caret = key && active.selectionStart !== undefined ? [active.selectionStart, active.selectionEnd] : null;
-  return { scroll, key, caret };
+  const { key, caret, value } = captureField(document.activeElement);
+  return { scroll, key, caret, value };
 }
 
-function restoreUi({ scroll, key, caret }) {
+function restoreUi({ scroll, key, caret, value }) {
   for (const pane of root.querySelectorAll('[data-pane]')) {
     if (scroll[pane.dataset.pane] !== undefined) pane.scrollTop = scroll[pane.dataset.pane];
   }
   if (!key) return;
   const next = root.querySelector(`[data-focus-key="${key}"]`);
-  if (!next) return;
-  next.focus();
-  if (caret && next.setSelectionRange) next.setSelectionRange(caret[0], caret[1]);
+  restoreField(next, { caret, value });
 }
 
 const HELP_ROWS = [
@@ -256,7 +263,7 @@ async function boot() {
     await loadCases();
     // sanitizeFilters needs both the config lists and the tags derived from the loaded
     // cases, so a saved filter set can only be trusted once both are in state.
-    setState({ filters: loadFilters(window.localStorage, filterOptions(state)) });
+    setState({ filters: loadFilters(storage() ?? NULL_STORE, filterOptions(state)) });
   } catch (err) {
     // A toast alone clears after 6 seconds and leaves the page stuck on "Loading" for ever
     // with nothing on screen explaining why, so the failure is kept in state too.

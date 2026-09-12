@@ -9,6 +9,13 @@ export function visibleRuns(runs, { showClosed = false, selectedId = null } = {}
   return [...runs].reverse().filter((r) => showClosed || !isClosed(r) || r.id === selectedId);
 }
 
+// Every case whose id is in the run's frozen caseIds list, regardless of the active
+// filters. This is the denominator renderList needs to tell "nothing has ever been in this
+// run" apart from "the filters hide everything that is" (see the `total` parameter).
+export function inRunCases(cases, run) {
+  return cases.filter((c) => run.caseIds.includes(c.id));
+}
+
 export function executionDefaults(c, run) {
   return { env: c.execution?.env ?? run.env, locale: c.execution?.locale ?? run.locale };
 }
@@ -68,7 +75,7 @@ function newRunForm(state, actions) {
 }
 
 function runList(state, actions) {
-  const toggle = el('input', { type: 'checkbox', onchange: () => actions.toggleClosed() });
+  const toggle = el('input', { type: 'checkbox', 'data-focus-key': 'show-closed', onchange: () => actions.toggleClosed() });
   toggle.checked = Boolean(state.showClosed);
   const bar = el('label', { class: 'inline', text: 'Show closed' }, [toggle]);
   const rows = visibleRuns(state.runs, { showClosed: state.showClosed, selectedId: state.run?.id ?? null });
@@ -106,7 +113,7 @@ function statusStrip(summary) {
 }
 
 function statusFilter(state, actions) {
-  const box = el('select', { onchange: (e) => actions.setFilters({ ...state.filters, status: e.target.value || undefined }) }, [
+  const box = el('select', { 'data-focus-key': 'filter-status', onchange: (e) => actions.setFilters({ ...state.filters, status: e.target.value || undefined }) }, [
     el('option', { value: '', text: 'All statuses' }),
     ...SUMMARY_STATUSES.map((s) => el('option', { value: s, text: s })),
   ]);
@@ -194,14 +201,15 @@ export function renderRuns(root, state, actions) {
     root.append(left, el('section', { class: 'pane', 'data-pane': 'list' }, [el('p', { class: 'empty', text: 'Pick a run or create one' })]), el('section', { class: 'pane', 'data-pane': 'detail' }, [renderProgress(state)]));
     return;
   }
-  const inRun = state.cases.filter((c) => state.run.caseIds.includes(c.id) && matchesFilters(c, state.filters));
+  const inRunAll = inRunCases(state.cases, state.run);
+  const inRun = inRunAll.filter((c) => matchesFilters(c, state.filters));
   const selected = inRun.find((c) => c.id === state.selectedId);
   const panelFor = (c) => (isClosed(state.run) ? closedExecutionPanel(c, state) : executionPanel(c, state, actions));
   const right = selected
     ? [renderCaseDetail(selected, state), panelFor(selected), defectPanel(selected, state, actions)]
     : [renderProgress(state), ...(state.config.roles.length ? [el('h2', { text: 'By role' }), renderProgress(state, 'role')] : []), el('p', { class: 'empty', text: 'Select a case. Keys: j/k move, p f b s r record.' })];
-  const summary = headerSummary(countStatuses(state.cases.filter((c) => state.run.caseIds.includes(c.id))), state.run.summary);
+  const summary = headerSummary(countStatuses(inRunAll), state.run.summary);
   const controls = el('div', { class: 'pane-head' }, [statusFilter(state, actions), closeControl(state, actions)]);
   const head = el('div', {}, [el('div', { class: 'pane-head' }, [el('h2', { text: `${state.run.name} (${inRun.length})` }), el('span', { class: 'badge', text: summaryLabel(summary) })]), statusStrip(summary), controls]);
-  root.append(left, el('section', { class: 'pane', 'data-pane': 'list' }, [head, renderList(state, actions, inRun)]), el('section', { class: 'pane', 'data-pane': 'detail' }, right));
+  root.append(left, el('section', { class: 'pane', 'data-pane': 'list' }, [head, renderList(state, actions, inRun, inRunAll.length)]), el('section', { class: 'pane', 'data-pane': 'detail' }, right));
 }

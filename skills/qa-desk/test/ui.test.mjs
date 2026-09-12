@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const read = (rel) => readFile(new URL(`../public/${rel}`, import.meta.url), 'utf8');
-const FILES = ['index.html', 'style.css', 'api.js', 'app.js', 'keys.js', 'filters-store.js', 'views/cases.js', 'views/runs.js'];
+const FILES = ['index.html', 'style.css', 'api.js', 'app.js', 'keys.js', 'filters-store.js', 'ui-restore.js', 'views/cases.js', 'views/runs.js'];
 
 test('every UI file exists and stays under 800 lines', async () => {
   for (const f of FILES) {
@@ -149,6 +149,14 @@ test('headerSummary folds run.summary.total in so the header cannot disagree wit
   assert.deepEqual(withMissing.counts, { passed: 1, failed: 0, blocked: 0, skipped: 0, retest: 0, untested: 2 });
 });
 
+test('inRunCases counts every case in the run, ignoring the active filters (regression: the runs view empty state)', async () => {
+  const { inRunCases } = await import('../public/views/runs.js');
+  const run = { caseIds: ['QA-0001', 'QA-0002'] };
+  const cases = [{ id: 'QA-0001' }, { id: 'QA-0002' }, { id: 'QA-0003' }];
+  assert.deepEqual(inRunCases(cases, run).map((c) => c.id), ['QA-0001', 'QA-0002']);
+  assert.deepEqual(inRunCases([], run), []);
+});
+
 test('the defect hint appears only while Open as defect is disabled', async () => {
   const { defectHint } = await import('../public/views/runs.js');
   assert.equal(defectHint('failed'), null);
@@ -255,4 +263,55 @@ test('loadFilters and saveFilters survive a broken store', async () => {
   assert.doesNotThrow(() => saveFilters(broken, { component: 'auth' }));
   const garbage = { getItem: () => '{not json', setItem() {} };
   assert.deepEqual(loadFilters(garbage, allowed), {});
+});
+
+test('captureField returns no key/caret/value when nothing is focused', async () => {
+  const { captureField } = await import('../public/ui-restore.js');
+  assert.deepEqual(captureField(null), { key: null, caret: null, value: null });
+  assert.deepEqual(captureField({ dataset: {} }), { key: null, caret: null, value: null });
+});
+
+test('captureField treats a number input as caret-less: selectionStart null (modern engines) and selectionStart throwing (older engines)', async () => {
+  const { captureField } = await import('../public/ui-restore.js');
+  const nullSelection = { dataset: { focusKey: 'duration' }, selectionStart: null, selectionEnd: null, value: '30' };
+  assert.deepEqual(captureField(nullSelection), { key: 'duration', caret: null, value: '30' });
+  const throwingSelection = {
+    dataset: { focusKey: 'duration' },
+    get selectionStart() { throw new DOMException('not supported on this input type'); },
+    value: '30',
+  };
+  assert.deepEqual(captureField(throwingSelection), { key: 'duration', caret: null, value: '30' });
+});
+
+test('captureField captures a real caret on a text-like field', async () => {
+  const { captureField } = await import('../public/ui-restore.js');
+  const field = { dataset: { focusKey: 'evidence' }, selectionStart: 3, selectionEnd: 3, value: 'evi' };
+  assert.deepEqual(captureField(field), { key: 'evidence', caret: [3, 3], value: 'evi' });
+});
+
+test('restoreField reassigns a mid-typing value before restoring the caret', async () => {
+  const { restoreField } = await import('../public/ui-restore.js');
+  let focused = false;
+  const ranges = [];
+  const node = {
+    value: '',
+    focus() { focused = true; },
+    setSelectionRange(start, end) { ranges.push([start, end]); },
+  };
+  restoreField(node, { caret: [3, 3], value: 'evi' });
+  assert.equal(focused, true);
+  assert.equal(node.value, 'evi', 'the value the tester was typing must survive the redraw');
+  assert.deepEqual(ranges, [[3, 3]]);
+});
+
+test('restoreField tolerates setSelectionRange throwing on a number input, and does nothing without a target', async () => {
+  const { restoreField } = await import('../public/ui-restore.js');
+  const node = {
+    value: '',
+    focus() {},
+    setSelectionRange() { throw new DOMException('not supported on input[type=number]'); },
+  };
+  assert.doesNotThrow(() => restoreField(node, { caret: [0, 0], value: '30' }));
+  assert.equal(node.value, '30');
+  assert.doesNotThrow(() => restoreField(null, { caret: [0, 0], value: 'x' }));
 });
