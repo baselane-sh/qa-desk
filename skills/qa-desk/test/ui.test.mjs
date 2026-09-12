@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const read = (rel) => readFile(new URL(`../public/${rel}`, import.meta.url), 'utf8');
-const FILES = ['index.html', 'style.css', 'api.js', 'app.js', 'keys.js', 'filters-store.js', 'ui-restore.js', 'views/cases.js', 'views/runs.js'];
+const FILES = ['index.html', 'style.css', 'api.js', 'app.js', 'keys.js', 'filters-store.js', 'ui-restore.js', 'status.js', 'views/cases.js', 'views/runs.js'];
 
 test('every UI file exists and stays under 800 lines', async () => {
   for (const f of FILES) {
@@ -72,6 +72,12 @@ test('recording a status refreshes the case history', async () => {
   const end = text.indexOf('async function openDefect(');
   assert.ok(start > 0 && end > start, 'record and openDefect must both exist in app.js');
   assert.match(text.slice(start, end), /\/history/, 'record must refetch the history');
+});
+
+test('the execution textareas seed from the unsaved draft, never straight from the saved value', async () => {
+  const text = await read('views/runs.js');
+  assert.match(text, /actual\.value = fieldValue\(state\.saveState, c\.execution, 'actual'\)/);
+  assert.match(text, /evidence\.value = fieldValue\(state\.saveState, c\.execution, 'evidence'\)/);
 });
 
 test('keyToStatus ignores a key held with a modifier and maps a bare key to its status', async () => {
@@ -346,4 +352,44 @@ test('restoreField leaves a node that cannot take focus alone', async () => {
   const node = { value: 'old' };
   assert.doesNotThrow(() => restoreField(node, { key: 'q', caret: null, value: 'typed' }));
   assert.equal(node.value, 'typed');
+});
+
+test('saveStateLabel names every save state', async () => {
+  const { saveStateLabel } = await import('../public/status.js');
+  assert.equal(saveStateLabel('idle'), '');
+  assert.equal(saveStateLabel('saving'), 'Saving');
+  assert.equal(saveStateLabel('saved', '14:05:09'), 'Saved 14:05:09');
+  assert.equal(saveStateLabel('failed'), 'Not saved. Edit again to retry.');
+});
+
+test('connectionLabel reports both states', async () => {
+  const { connectionLabel } = await import('../public/status.js');
+  assert.deepEqual(connectionLabel(true), { text: 'Connected', className: 'dot online' });
+  assert.deepEqual(connectionLabel(false), { text: 'Server not responding', className: 'dot offline' });
+});
+
+test('fieldValue reads the unsaved draft while a save has failed, otherwise the saved value', async () => {
+  const { fieldValue } = await import('../public/status.js');
+  assert.equal(fieldValue({}, { actual: 'saved text' }, 'actual'), 'saved text');
+  assert.equal(fieldValue({ actual: { status: 'failed', draft: 'typed text' } }, { actual: 'saved text' }, 'actual'), 'typed text');
+  assert.equal(fieldValue({ actual: { status: 'saved', draft: null } }, { actual: 'saved text' }, 'actual'), 'saved text');
+  assert.equal(fieldValue(null, null, 'actual'), '');
+});
+
+test('a failed fetch reports offline; any answer reports online again', async () => {
+  const { api, onConnection } = await import('../public/api.js');
+  const seen = [];
+  onConnection((online) => seen.push(online));
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => { throw new Error('network down'); };
+    await assert.rejects(() => api.get('/api/cases'));
+    assert.deepEqual(seen, [false]);
+    globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: [] }) });
+    await api.get('/api/cases');
+    assert.deepEqual(seen, [false, true]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    onConnection(() => {});
+  }
 });

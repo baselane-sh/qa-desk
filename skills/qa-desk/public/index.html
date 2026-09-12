@@ -16,6 +16,7 @@
   <span id="run-badge" class="badge muted">No run selected</span>
   <span id="toast" class="toast" hidden></span>
 </header>
+<div id="banner-wrap" aria-live="assertive"></div>
 <main id="root" class="layout"></main>
 <footer class="legend">
   <span><kbd>j</kbd> <kbd>k</kbd> move</span>
@@ -25,6 +26,8 @@
   <span><kbd>/</kbd> search</span>
   <span><kbd>Esc</kbd> leave field</span>
   <span><kbd>?</kbd> keys</span>
+  <span class="conn"><span id="conn-dot" class="dot online"></span><span id="conn-label">Connected</span></span>
+  <span id="offline-help" class="muted" hidden></span>
 </footer>
 <div id="overlay-root"></div>
 <script type="module" src="app.js"></script>

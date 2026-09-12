@@ -1,4 +1,5 @@
 import { el, renderList, renderProgress, renderCaseDetail, matchesFilters, statusOf } from './cases.js';
+import { saveStateLabel, fieldValue } from '../status.js';
 
 const STATUSES = ['passed', 'failed', 'blocked', 'skipped', 'retest'];
 const DEFECT_STATUSES = ['failed', 'blocked'];
@@ -140,6 +141,12 @@ function pickList(values, current, locked, onchange, focusKey) {
   return box;
 }
 
+function saveStateNode(state, field) {
+  const info = state.saveState?.[field];
+  const text = info ? saveStateLabel(info.status, info.at) : '';
+  return text ? el('span', { class: `save-state ${info.status}`, text: ` · ${text}` }) : null;
+}
+
 function executionPanel(c, state, actions) {
   const status = statusOf(c);
   const locked = needsStatusFirst(c);
@@ -147,9 +154,9 @@ function executionPanel(c, state, actions) {
   const { env, locale } = executionDefaults(c, state.run);
   const buttons = el('div', { class: 'verdicts' }, STATUSES.map((s) => el('button', { class: `status-btn ${s === status ? 'on' : ''}`, text: s, onclick: () => actions.record(c.id, { status: s }) }, [el('kbd', { text: s[0] })])));
   const actual = el('textarea', { 'data-focus-key': 'actual', placeholder: 'Actual result: what you saw, step number, error text', disabled: lock, onblur: (e) => { if (e.target.value !== (c.execution?.actual ?? '')) actions.record(c.id, { actual: e.target.value }); } });
-  actual.value = c.execution?.actual ?? '';
+  actual.value = fieldValue(state.saveState, c.execution, 'actual');
   const evidence = el('textarea', { 'data-focus-key': 'evidence', placeholder: 'Evidence: links or paths to screenshots, logs or recordings', disabled: lock, onblur: (e) => { if (e.target.value !== (c.execution?.evidence ?? '')) actions.record(c.id, { evidence: e.target.value }); } });
-  evidence.value = c.execution?.evidence ?? '';
+  evidence.value = fieldValue(state.saveState, c.execution, 'evidence');
   const duration = el('input', { 'data-focus-key': 'duration', type: 'number', min: '0', placeholder: 'seconds', value: c.execution?.durationSec ?? '', disabled: lock, onblur: (e) => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= 0 && v !== c.execution?.durationSec) actions.record(c.id, { durationSec: v }); } });
   const envBox = pickList([...state.config.environments, 'any'], env, locked, (v) => actions.record(c.id, { env: v }), 'env');
   const localeBox = pickList([...state.config.locales, 'any'], locale, locked, (v) => actions.record(c.id, { locale: v }), 'locale');
@@ -157,8 +164,8 @@ function executionPanel(c, state, actions) {
     el('h4', { text: `Execution in ${state.run.id}` }),
     buttons,
     locked ? el('p', { class: 'muted', text: 'Record a status first. The details below open once this case has an execution.' }) : null,
-    el('label', { text: 'Actual result' }, [actual]),
-    el('label', { text: 'Evidence' }, [evidence]),
+    el('label', { text: 'Actual result' }, [saveStateNode(state, 'actual'), actual]),
+    el('label', { text: 'Evidence' }, [saveStateNode(state, 'evidence'), evidence]),
     el('div', { class: 'fields' }, [
       el('label', { text: 'Duration (s)' }, [duration]),
       el('label', { text: 'Environment' }, [envBox]),

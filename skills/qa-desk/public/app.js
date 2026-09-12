@@ -1,33 +1,49 @@
-import { api } from './api.js';
+import { api, onConnection } from './api.js';
 import { renderCases, el, filterOptions } from './views/cases.js';
 import { renderRuns } from './views/runs.js';
 import { nextIndex, debounce, keyAction } from './keys.js';
 import { loadFilters, saveFilters } from './filters-store.js';
 import { captureField, restoreField } from './ui-restore.js';
+import { connectionLabel, OFFLINE_HELP } from './status.js';
 
 const VIEWS = { cases: renderCases, runs: renderRuns };
+const IDLE_SAVE_STATE = { actual: { status: 'idle', at: null, draft: null }, evidence: { status: 'idle', at: null, draft: null } };
 
-let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], historyLoaded: false, defect: null, log: '', bootError: null, showClosed: false, confirmClose: null, help: false, scrollToSelected: false };
+let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], historyLoaded: false, defect: null, log: '', bootError: null, showClosed: false, confirmClose: null, help: false, scrollToSelected: false, online: true, saveState: IDLE_SAVE_STATE };
 const root = document.getElementById('root');
 const overlayRoot = document.getElementById('overlay-root');
 const toastEl = document.getElementById('toast');
 const runBadge = document.getElementById('run-badge');
+const bannerWrap = document.getElementById('banner-wrap');
+const connDot = document.getElementById('conn-dot');
+const connLabel = document.getElementById('conn-label');
+const offlineHelp = document.getElementById('offline-help');
 
 export function setState(patch) {
   state = { ...state, ...patch };
   render();
 }
 
-function toast(message, isError = false) {
+function toast(message) {
   toastEl.textContent = message;
   toastEl.hidden = false;
-  toastEl.classList.toggle('error', isError);
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => { toastEl.hidden = true; }, isError ? 6000 : 2500);
+  toast.timer = setTimeout(() => { toastEl.hidden = true; }, 2500);
+}
+
+// The banner replaces the vanishing toast for errors: it stays up long enough to read, and
+// the tester can dismiss it early. A later error resets the timer instead of stacking.
+function showBanner(message) {
+  clearTimeout(showBanner.timer);
+  bannerWrap.replaceChildren(el('div', { class: 'banner' }, [
+    el('span', { text: message }),
+    el('button', { text: 'Dismiss', onclick: () => bannerWrap.replaceChildren() }),
+  ]));
+  showBanner.timer = setTimeout(() => bannerWrap.replaceChildren(), 8000);
 }
 
 async function guarded(fn) {
-  try { await fn(); } catch (err) { toast(err.message, true); }
+  try { await fn(); } catch (err) { showBanner(err.message); }
 }
 
 async function loadCases() {
@@ -41,7 +57,7 @@ async function loadCases() {
 // that resolves after a newer one cannot overwrite the newer answer.
 async function selectCase(id) {
   const token = ++selectCase.token;
-  setState({ selectedId: id, history: [], historyLoaded: false, defect: null, log: '', scrollToSelected: true });
+  setState({ selectedId: id, history: [], historyLoaded: false, defect: null, log: '', scrollToSelected: true, saveState: IDLE_SAVE_STATE });
   if (!id) return;
   const history = await api.get(`/api/cases/${encodeURIComponent(id)}/history`);
   const defect = state.run ? await findDefect(state.run.id, id) : null;
@@ -66,19 +82,61 @@ async function selectRun(run) {
 
 let recordToken = 0;
 
+function nowLabel() {
+  return new Date().toLocaleTimeString([], { hourCycle: 'h23', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+// Only 'actual' and 'evidence' carry a save state label in the UI; a patch that only
+// touches status, duration, env or locale leaves saveState untouched (fields is empty). A
+// failed save keeps its draft (the value the tester typed) so a redraw can put it straight
+// back in the field instead of falling back to the last saved value; a saved one clears it.
+function markFields(fields, status, at = null, draftPatch = null) {
+  if (!fields.length) return state.saveState;
+  const next = { ...state.saveState };
+  for (const f of fields) next[f] = { status, at, draft: draftPatch?.[f] ?? null };
+  return next;
+}
+
 // Two records on the same case inside one round trip can otherwise resolve out of order,
 // with the older response landing last and overwriting the newer one. A token per call, and
 // computing cases only once every await has settled, means a response that is no longer the
 // most recent call is dropped instead of applied.
+//
+// A verdict button or key press has already settled focus by the time this runs, so it is
+// applied to state.cases before the request goes out: the case row, the status strip and the
+// tally all read from state.cases, so all three move at once. A blur handler is still
+// mid-transition when IT calls this, though: redrawing synchronously there would tear down
+// the very field the browser is about to focus next (this is the exact hazard the earlier
+// capture/restore fixes exist for), so a text-only patch never redraws before its response
+// and only ever shows 'saved' or 'failed', never 'saving'.
 async function record(caseId, patch) {
-  if (!state.run) { toast('Create or pick a run first', true); return; }
-  if (state.run.closedAt) { toast('This run is closed', true); return; }
+  if (!state.run) { showBanner('Create or pick a run first'); return; }
+  if (state.run.closedAt) { showBanner('This run is closed'); return; }
   const token = ++recordToken;
-  const execution = await api.put(`/api/runs/${encodeURIComponent(state.run.id)}/executions/${encodeURIComponent(caseId)}`, patch);
+  const fields = ['actual', 'evidence'].filter((f) => f in patch);
+  const previousExecution = state.cases.find((c) => c.id === caseId)?.execution;
+  if ('status' in patch) {
+    setState({ cases: state.cases.map((c) => (c.id === caseId ? { ...c, execution: { ...previousExecution, ...patch } } : c)) });
+  }
+  let execution;
+  try {
+    execution = await api.put(`/api/runs/${encodeURIComponent(state.run.id)}/executions/${encodeURIComponent(caseId)}`, patch);
+  } catch (err) {
+    setState({
+      cases: state.cases.map((c) => (c.id === caseId ? { ...c, execution: previousExecution } : c)),
+      saveState: markFields(fields, 'failed', null, patch),
+    });
+    throw err;
+  }
   const history = state.selectedId === caseId ? await api.get(`/api/cases/${encodeURIComponent(caseId)}/history`) : state.history;
-  if (token !== recordToken) return;
+  if (token !== recordToken) {
+    // A newer call for this case already owns `cases`/`history`, but this write still
+    // succeeded: its field must not be left showing a stale draft or a stale 'failed' label.
+    if (fields.length) setState({ saveState: markFields(fields, 'saved', nowLabel()) });
+    return;
+  }
   const cases = state.cases.map((c) => (c.id === caseId ? { ...c, execution } : c));
-  setState({ cases, history });
+  setState({ cases, history, saveState: markFields(fields, 'saved', nowLabel()) });
 }
 
 // caseHistory on the server is every append to executions.jsonl for this case, oldest first,
@@ -211,8 +269,17 @@ function helpOverlay() {
   ]);
 }
 
+function renderConnection() {
+  const { text, className } = connectionLabel(state.online);
+  connDot.className = className;
+  connLabel.textContent = text;
+  offlineHelp.textContent = OFFLINE_HELP;
+  offlineHelp.hidden = state.online;
+}
+
 function render() {
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.view === state.view));
+  renderConnection();
   const ui = captureUi();
   root.replaceChildren();
   VIEWS[state.view](root, state, actions);
@@ -255,6 +322,25 @@ function onKey(event) {
 
 document.getElementById('tabs').addEventListener('click', (e) => { if (e.target.dataset.view) actions.setView(e.target.dataset.view); });
 document.addEventListener('keydown', onKey);
+onConnection((online) => { if (online !== state.online) setState({ online }); });
+
+// A tab closed (or reloaded) while a field is still focused never fires that field's blur
+// handler, so its edit would otherwise be lost. pagehide is the last moment a script runs
+// before the page goes away; fetch's keepalive flag lets the request outlive it. This
+// bypasses api.js on purpose: there is no page left to show the response to.
+window.addEventListener('pagehide', () => {
+  const active = document.activeElement;
+  const field = active?.dataset?.focusKey;
+  if (field !== 'actual' && field !== 'evidence') return;
+  if (!state.run || state.run.closedAt || !state.selectedId) return;
+  const c = state.cases.find((x) => x.id === state.selectedId);
+  const value = active.value;
+  if ((c?.execution?.[field] ?? '') === value) return;
+  const url = `/api/runs/${encodeURIComponent(state.run.id)}/executions/${encodeURIComponent(state.selectedId)}`;
+  try {
+    fetch(url, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ [field]: value }), keepalive: true });
+  } catch { /* best effort: the page is already gone */ }
+});
 
 async function boot() {
   try {
@@ -268,7 +354,7 @@ async function boot() {
     // A toast alone clears after 6 seconds and leaves the page stuck on "Loading" for ever
     // with nothing on screen explaining why, so the failure is kept in state too.
     setState({ bootError: err.message });
-    toast(err.message, true);
+    showBanner(err.message);
   }
 }
 boot();
