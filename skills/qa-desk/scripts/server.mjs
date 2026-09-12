@@ -7,7 +7,7 @@ import { loadConfig } from './lib/config.mjs';
 import { dataPaths } from './lib/paths.mjs';
 import { readJson } from './lib/store.mjs';
 import { validateExecutionPatch, validateRunInput } from './lib/validate.mjs';
-import { createRun, listRuns, getRun, recordExecution, listExecutions, caseHistory } from './lib/runs.mjs';
+import { createRun, listRuns, getRun, closeRun, recordExecution, listExecutions, caseHistory } from './lib/runs.mjs';
 import { createDefect, getDefect, findDefect, listDefects } from './lib/defects.mjs';
 import { buildDefectTitle, buildDefectBody } from './lib/defect-body.mjs';
 import { createTracker } from './lib/tracker.mjs';
@@ -121,6 +121,14 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
     return createRun(paths, v.value);
   }
 
+  async function closeRunRoute(id) {
+    await loadRun(id);
+    try { return await closeRun(paths, id); } catch (err) {
+      if (/already closed/.test(err.message)) throw new HttpError(409, err.message);
+      throw err;
+    }
+  }
+
   async function executionRoute(req, runId, caseId) {
     const v = validateExecutionPatch(await readBody(req), config);
     if (!v.ok) throw new HttpError(400, v.error);
@@ -130,7 +138,10 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
     // untested is the absence of a record, not a record with no status: a status-free row
     // would otherwise be counted as executed by coverage and reports.
     if (!previous && v.value.status === undefined) throw new HttpError(400, 'status is required for the first execution of a case');
-    return recordExecution(paths, { runId, caseId, ...v.value }, { executedBy });
+    try { return await recordExecution(paths, { runId, caseId, ...v.value }, { executedBy }); } catch (err) {
+      if (/is closed/.test(err.message)) throw new HttpError(409, err.message);
+      throw err;
+    }
   }
 
   async function createDefectRoute(req) {
@@ -190,6 +201,7 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
     ['GET', /^\/api\/cases\/([\w-]+)\/history$/, async (req, [id]) => { await loadCase(id); return caseHistory(paths, id); }],
     ['GET', /^\/api\/runs$/, async () => listRuns(paths)],
     ['POST', /^\/api\/runs$/, async (req) => createRunRoute(req)],
+    ['POST', /^\/api\/runs\/([\w-]+)\/close$/, async (req, [id]) => closeRunRoute(id)],
     ['GET', /^\/api\/runs\/([\w-]+)$/, async (req, [id]) => ({ ...(await loadRun(id)), executions: Object.fromEntries(await listExecutions(paths, id)) })],
     ['PUT', /^\/api\/runs\/([\w-]+)\/executions\/([\w-]+)$/, async (req, [runId, caseId]) => executionRoute(req, runId, caseId)],
     ['POST', /^\/api\/defects$/, async (req) => createDefectRoute(req)],

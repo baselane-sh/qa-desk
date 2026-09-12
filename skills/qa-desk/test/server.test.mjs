@@ -86,6 +86,21 @@ test('runs: create, list, get, execution, cases with runId, history', async (t) 
   assert.equal((await s.call('GET', '/api/runs/R-0009')).status, 404);
 });
 
+test('a run closes once, keeps its record, and then refuses executions', async (t) => {
+  const s = await boot();
+  t.after(() => s.close());
+  await makeRun(s);
+  const closed = await s.call('POST', '/api/runs/R-0001/close');
+  assert.equal(closed.status, 200, JSON.stringify(closed.body));
+  assert.equal(typeof closed.body.data.closedAt, 'string');
+  assert.equal((await s.call('POST', '/api/runs/R-0001/close')).status, 409);
+  assert.equal((await s.call('POST', '/api/runs/R-0009/close')).status, 404);
+  assert.equal((await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'passed' })).status, 409);
+  const list = await s.call('GET', '/api/runs');
+  assert.equal(list.body.data.length, 1);
+  assert.equal(list.body.data[0].closedAt, closed.body.data.closedAt);
+});
+
 test('an execution with no status is rejected until one exists, then a status-free patch is fine', async (t) => {
   const s = await boot();
   t.after(() => s.close());

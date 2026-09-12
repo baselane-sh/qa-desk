@@ -17,6 +17,20 @@ export async function getRun(paths, id) {
   return (await listRuns(paths)).find((r) => r.id === id) ?? null;
 }
 
+export async function closeRun(paths, id, { now = defaultNow } = {}) {
+  // Read-then-append must be one atomic step under the runs queue, the same as createRun,
+  // or two concurrent closes of the same run could both read closedAt as null and both
+  // append a closed record.
+  return withJsonlQueue(paths.runs, async () => {
+    const run = await getRun(paths, id);
+    if (!run) throw new Error(`unknown run ${id}`);
+    if (run.closedAt) throw new Error(`run ${id} is already closed`);
+    const closed = { ...run, closedAt: now() };
+    await writeJsonlLine(paths.runs, closed);
+    return closed;
+  });
+}
+
 export async function createRun(paths, input, { now = defaultNow } = {}) {
   // Computing the next id and appending it must be one atomic step, the same as every other
   // read-modify-write cycle on a JSONL file, or two concurrent creates (a double click on
@@ -46,6 +60,7 @@ export async function recordExecution(paths, { runId, caseId, ...patch }, { now 
   const run = await getRun(paths, runId);
   if (!run) throw new Error(`unknown run ${runId}`);
   if (!run.caseIds.includes(caseId)) throw new Error(`case ${caseId} is not in run ${runId}`);
+  if (run.closedAt) throw new Error(`run ${runId} is closed`);
   return withJsonlQueue(paths.executions, async () => {
     const previous = (await listExecutions(paths, runId)).get(caseId) ?? {};
     const execution = { ...previous, runId, caseId, env: previous.env ?? run.env, locale: previous.locale ?? run.locale, ...patch, executedBy, executedAt: now() };

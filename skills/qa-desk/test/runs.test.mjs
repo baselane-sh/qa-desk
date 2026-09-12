@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createRun, listRuns, getRun, recordExecution, listExecutions, caseHistory } from '../scripts/lib/runs.mjs';
+import { createRun, listRuns, getRun, closeRun, recordExecution, listExecutions, caseHistory } from '../scripts/lib/runs.mjs';
 import { dataPaths } from '../scripts/lib/paths.mjs';
 
 const now = () => '2026-09-12T10:00:00.000Z';
@@ -56,4 +56,18 @@ test('recordExecution refuses an unknown run or a case outside the run', async (
   await createRun(p, input, { now });
   await assert.rejects(recordExecution(p, { runId: 'R-0007', caseId: 'QA-0001', status: 'passed' }, { now }), /unknown run R-0007/);
   await assert.rejects(recordExecution(p, { runId: 'R-0001', caseId: 'QA-0099', status: 'passed' }, { now }), /QA-0099 is not in run R-0001/);
+});
+
+test('closeRun stamps closedAt once and a closed run takes no more executions', async () => {
+  const p = await paths();
+  const run = await createRun(p, input, { now });
+  const closed = await closeRun(p, run.id, { now });
+  assert.equal(closed.closedAt, now());
+  assert.equal(closed.id, 'R-0001');
+  assert.deepEqual(closed.caseIds, input.caseIds);
+  assert.equal((await getRun(p, 'R-0001')).closedAt, now());
+  assert.deepEqual((await listRuns(p)).map((r) => r.id), ['R-0001']);
+  await assert.rejects(closeRun(p, 'R-0001', { now }), /run R-0001 is already closed/);
+  await assert.rejects(closeRun(p, 'R-0009', { now }), /unknown run R-0009/);
+  await assert.rejects(recordExecution(p, { runId: 'R-0001', caseId: 'QA-0001', status: 'passed' }, { now }), /run R-0001 is closed/);
 });
