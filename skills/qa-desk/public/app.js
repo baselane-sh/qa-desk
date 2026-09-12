@@ -57,7 +57,9 @@ async function record(caseId, patch) {
   if (!state.run) { toast('Create or pick a run first', true); return; }
   if (state.run.closedAt) { toast('This run is closed', true); return; }
   const execution = await api.put(`/api/runs/${encodeURIComponent(state.run.id)}/executions/${encodeURIComponent(caseId)}`, patch);
-  setState({ cases: state.cases.map((c) => (c.id === caseId ? { ...c, execution } : c)) });
+  const cases = state.cases.map((c) => (c.id === caseId ? { ...c, execution } : c));
+  const history = state.selectedId === caseId ? await api.get(`/api/cases/${encodeURIComponent(caseId)}/history`) : state.history;
+  setState({ cases, history });
 }
 
 async function openDefect(caseId) {

@@ -20,6 +20,20 @@ export function runBadges(c) {
   return Object.entries(c.latestByRun ?? {}).map(([runId, execution]) => ({ runId, status: execution?.status ?? 'untested' }));
 }
 
+const MAX_LINE = 80;
+
+export function truncateLine(text, max = MAX_LINE) {
+  const one = String(text ?? '').replace(/\s+/g, ' ').trim();
+  return one.length > max ? `${one.slice(0, max - 3)}...` : one;
+}
+
+export function historyLine(h) {
+  const parts = [`${h.runId} ${h.runName ?? ''}`.trim(), h.status ?? 'untested', `by ${h.executedBy ?? 'unknown'}`, `at ${h.executedAt ?? 'unknown'}`];
+  if (Number.isInteger(h.durationSec)) parts.push(`${h.durationSec}s`);
+  const line = parts.join(' · ');
+  return h.actual ? `${line}: ${truncateLine(h.actual)}` : line;
+}
+
 export function matchesFilters(c, f) {
   for (const key of ['component', 'type', 'priority', 'severity', 'env', 'locale', 'automation']) {
     if (f[key] && c[key] !== f[key]) return false;
@@ -92,7 +106,7 @@ export function renderCaseDetail(c, state) {
     el('thead', {}, [el('tr', {}, [el('th', { text: '#' }), el('th', { text: 'Action' }), el('th', { text: 'Expected' })])]),
     el('tbody', {}, c.steps.map((s, i) => el('tr', {}, [el('td', { text: String(i + 1) }), el('td', { text: s.data ? `${s.action}\nData: ${s.data}` : s.action, style: 'white-space:pre-wrap' }), el('td', { text: s.expected })]))),
   ]);
-  const history = el('ul', { class: 'history list' }, state.history.length ? state.history.map((h) => el('li', { text: `${h.runId} ${h.status} by ${h.executedBy} at ${h.executedAt}${h.actual ? `: ${h.actual}` : ''}` })) : [el('li', { text: 'No executions yet' })]);
+  const history = el('ul', { class: 'history list' }, state.history.length ? state.history.map((h) => el('li', { text: historyLine(h) })) : [el('li', { text: 'No executions yet' })]);
   return el('div', { class: 'detail' }, [
     el('h3', { text: `${c.id} ${c.title}` }),
     el('p', { text: c.objective ?? '' }),

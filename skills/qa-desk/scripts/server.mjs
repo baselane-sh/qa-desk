@@ -153,6 +153,12 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
     return { ...run, executions, summary: await runSummary(paths, run) };
   }
 
+  async function historyRoute(id) {
+    await loadCase(id);
+    const names = new Map((await listRuns(paths)).map((r) => [r.id, r.name]));
+    return (await caseHistory(paths, id)).map((e) => ({ ...e, runName: names.get(e.runId) ?? e.runId }));
+  }
+
   async function executionRoute(req, runId, caseId) {
     const v = validateExecutionPatch(await readBody(req), config);
     if (!v.ok) throw new HttpError(400, v.error);
@@ -222,7 +228,7 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
   const routes = [
     ['GET', /^\/api\/config$/, async () => config],
     ['GET', /^\/api\/cases$/, async (req, [], url) => casesRoute(url)],
-    ['GET', /^\/api\/cases\/([\w-]+)\/history$/, async (req, [id]) => { await loadCase(id); return caseHistory(paths, id); }],
+    ['GET', /^\/api\/cases\/([\w-]+)\/history$/, async (req, [id]) => historyRoute(id)],
     ['GET', /^\/api\/runs$/, async () => listRunsRoute()],
     ['POST', /^\/api\/runs$/, async (req) => createRunRoute(req)],
     ['POST', /^\/api\/runs\/([\w-]+)\/close$/, async (req, [id]) => closeRunRoute(id)],

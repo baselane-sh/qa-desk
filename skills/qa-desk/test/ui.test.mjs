@@ -54,6 +54,26 @@ test('runBadges lists one badge per open run and calls a missing execution untes
   ]);
 });
 
+test('historyLine names the run, the verdict and one line of the actual result', async () => {
+  const { historyLine, truncateLine } = await import('../public/views/cases.js');
+  const full = { runId: 'R-0002', runName: 'Sprint 4', status: 'failed', executedBy: 'mo', executedAt: '2026-09-12T11:00:00.000Z', durationSec: 45, actual: 'line one\nline two' };
+  assert.equal(historyLine(full), 'R-0002 Sprint 4 · failed · by mo · at 2026-09-12T11:00:00.000Z · 45s: line one line two');
+  assert.equal(historyLine({ runId: 'R-0001', status: 'passed' }), 'R-0001 · passed · by unknown · at unknown');
+  assert.equal(truncateLine('  a\n\n  b  '), 'a b');
+  assert.equal(truncateLine('').length, 0);
+  const long = truncateLine('x'.repeat(200));
+  assert.equal(long.length, 80);
+  assert.ok(long.endsWith('...'));
+});
+
+test('recording a status refreshes the case history', async () => {
+  const text = await read('app.js');
+  const start = text.indexOf('async function record(');
+  const end = text.indexOf('async function openDefect(');
+  assert.ok(start > 0 && end > start, 'record and openDefect must both exist in app.js');
+  assert.match(text.slice(start, end), /\/history/, 'record must refetch the history');
+});
+
 test('keyToStatus ignores a key held with a modifier and maps a bare key to its status', async () => {
   const { keyToStatus } = await import('../public/keys.js');
   assert.equal(keyToStatus({ key: 'p', metaKey: true }), null);

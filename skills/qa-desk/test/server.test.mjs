@@ -259,3 +259,17 @@ test('GET /api/cases attaches the latest execution per open run and drops closed
   assert.equal(inRun[0].execution, null);
   await s.close();
 });
+
+test('case history carries the run name across runs', async () => {
+  const s = await boot();
+  await makeRun(s);
+  await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'failed', actual: 'boom' });
+  await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'retest' });
+  const history = (await s.call('GET', '/api/cases/QA-0001/history')).body.data;
+  assert.equal(history.length, 2);
+  assert.deepEqual(history.map((h) => h.status), ['failed', 'retest']);
+  assert.deepEqual(history.map((h) => h.runName), ['Sprint 3', 'Sprint 3']);
+  assert.equal(history[0].runId, 'R-0001');
+  assert.equal((await s.call('GET', '/api/cases/QA-9999/history')).status, 404);
+  await s.close();
+});
