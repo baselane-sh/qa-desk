@@ -262,7 +262,7 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
   return server;
 }
 
-async function gitUserName(repoRoot) {
+export async function gitUserName(repoRoot) {
   try { return (await execFileWithInput('git', ['config', 'user.name'], { cwd: repoRoot })).stdout.trim() || 'unknown'; } catch { return 'unknown'; }
 }
 

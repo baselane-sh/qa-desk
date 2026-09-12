@@ -134,3 +134,11 @@ test('countStatuses derives untested and summaryLabel reads as progress', async 
   assert.equal(summaryLabel(countStatuses([])), '0 of 0 done');
   assert.equal(summaryLabel(null), '');
 });
+
+test('the defect hint appears only while Open as defect is disabled', async () => {
+  const { defectHint } = await import('../public/views/runs.js');
+  assert.equal(defectHint('failed'), null);
+  assert.equal(defectHint('blocked'), null);
+  assert.equal(defectHint('passed'), 'Needs a failed or blocked execution');
+  assert.equal(defectHint('untested'), 'Needs a failed or blocked execution');
+});

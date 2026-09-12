@@ -34,6 +34,10 @@ export function summaryLabel(summary) {
   return summary ? `${summary.executed} of ${summary.total} done` : '';
 }
 
+export function defectHint(status) {
+  return DEFECT_STATUSES.includes(status) ? null : 'Needs a failed or blocked execution';
+}
+
 function newRunForm(state, actions) {
   const { config } = state;
   const name = el('input', { placeholder: 'Sprint 12 regression' });
@@ -143,7 +147,11 @@ function defectPanel(c, state, actions) {
   const status = statusOf(c);
   const defect = state.defect;
   if (!defect) {
-    return el('div', { class: 'actions' }, [el('button', { class: 'primary', text: 'Open as defect', disabled: DEFECT_STATUSES.includes(status) ? null : 'disabled', onclick: () => actions.openDefect(c.id) }), el('span', { class: 'badge muted', text: 'Needs a failed or blocked execution' })]);
+    const hint = defectHint(status);
+    return el('div', { class: 'actions' }, [
+      el('button', { class: 'primary', text: 'Open as defect', disabled: hint ? 'disabled' : null, onclick: () => actions.openDefect(c.id) }),
+      hint ? el('span', { class: 'badge muted', text: hint }) : null,
+    ]);
   }
   const d = defect.dispatch;
   const issueLink = defect.url ? el('a', { href: defect.url, target: '_blank', text: `${defect.tracker} #${defect.issueId}` }) : el('span', { text: `${defect.tracker} ${defect.issueId}` });

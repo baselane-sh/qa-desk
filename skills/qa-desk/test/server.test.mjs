@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
 import { EventEmitter } from 'node:events';
-import { createApp, checkRequest, execFileWithInput } from '../scripts/server.mjs';
+import { createApp, checkRequest, execFileWithInput, gitUserName } from '../scripts/server.mjs';
 import { createDispatcher } from '../scripts/lib/dispatch.mjs';
 import { writeJsonAtomic } from '../scripts/lib/store.mjs';
 import { dataPaths } from '../scripts/lib/paths.mjs';
@@ -272,4 +272,14 @@ test('case history carries the run name across runs', async () => {
   assert.equal(history[0].runId, 'R-0001');
   assert.equal((await s.call('GET', '/api/cases/QA-9999/history')).status, 404);
   await s.close();
+});
+
+test('executedBy comes from git config user.name and falls back to unknown', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'gituser-'));
+  await execFileWithInput('git', ['init', '-q'], { cwd: root });
+  await execFileWithInput('git', ['config', 'user.name', 'Ada Lovelace'], { cwd: root });
+  assert.equal(await gitUserName(root), 'Ada Lovelace');
+  assert.equal(await gitUserName(join(root, 'no-such-directory')), 'unknown');
+  const source = await readFile(new URL('../scripts/server.mjs', import.meta.url), 'utf8');
+  assert.match(source, /executedBy: await gitUserName\(repoRoot\)/, 'startServer must pass the git name as executedBy');
 });
