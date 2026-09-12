@@ -46,6 +46,18 @@ test('mergeOutputs keeps the invalid case from a partially valid file readable i
   assert.deepEqual(await readJson(join(p.generateOut, 'auth.json.rejected.json'), null), [bad]);
 });
 
+test('mergeOutputs does not re-ingest its own .rejected.json output on a later run', async () => {
+  const { root, p } = await repo();
+  await writeFile(join(p.generateOut, 'auth.json'), JSON.stringify([stripId(sampleCase()), { title: 'broken' }]));
+  const first = await mergeOutputs({ repoRoot: root, config: TEST_CONFIG });
+  assert.equal(first.invalid.length, 1);
+  assert.deepEqual(await readdir(p.generateOut), ['auth.json.rejected.json']);
+  const second = await mergeOutputs({ repoRoot: root, config: TEST_CONFIG });
+  assert.deepEqual(second.invalid, []);
+  assert.deepEqual(second.added, []);
+  assert.deepEqual(await readdir(p.generateOut), ['auth.json.rejected.json']);
+});
+
 test('mergeOutputs keeps invalid files in place when nothing was valid', async () => {
   const { root, p } = await repo();
   await writeFile(join(p.generateOut, 'auth.json'), '{"not":"an array"}');

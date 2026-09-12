@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const read = (rel) => readFile(new URL(`../public/${rel}`, import.meta.url), 'utf8');
-const FILES = ['index.html', 'style.css', 'api.js', 'app.js', 'views/cases.js', 'views/runs.js'];
+const FILES = ['index.html', 'style.css', 'api.js', 'app.js', 'keys.js', 'views/cases.js', 'views/runs.js'];
 
 test('every UI file exists and stays under 800 lines', async () => {
   for (const f of FILES) {
@@ -42,4 +42,13 @@ test('matchesFilters filters by every config list and by text', async () => {
   assert.equal(matchesFilters(c, { status: 'untested' }), true);
   assert.equal(matchesFilters({ ...c, execution: { status: 'failed' } }, { status: 'failed' }), true);
   assert.equal(matchesFilters({ ...c, execution: { status: 'failed' } }, { status: 'untested' }), false);
+});
+
+test('keyToStatus ignores a key held with a modifier and maps a bare key to its status', async () => {
+  const { keyToStatus } = await import('../public/keys.js');
+  assert.equal(keyToStatus({ key: 'p', metaKey: true }), null);
+  assert.equal(keyToStatus({ key: 'f', ctrlKey: true }), null);
+  assert.equal(keyToStatus({ key: 'r', altKey: true }), null);
+  assert.equal(keyToStatus({ key: 'p' }), 'passed');
+  assert.equal(keyToStatus({ key: 'x' }), null);
 });

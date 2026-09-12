@@ -23,6 +23,13 @@ test('createRun numbers runs and freezes caseIds', async () => {
   assert.equal(await getRun(p, 'R-0009'), null);
 });
 
+test('three concurrent createRun calls mint distinct ids', async () => {
+  const p = await paths();
+  const runs = await Promise.all([1, 2, 3].map(() => createRun(p, input, { now })));
+  assert.deepEqual(runs.map((r) => r.id).sort(), ['R-0001', 'R-0002', 'R-0003']);
+  assert.deepEqual((await listRuns(p)).map((r) => r.id).sort(), ['R-0001', 'R-0002', 'R-0003']);
+});
+
 test('recordExecution merges over the previous execution and history keeps every record', async () => {
   const p = await paths();
   const run = await createRun(p, input, { now });

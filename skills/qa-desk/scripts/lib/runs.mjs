@@ -1,4 +1,4 @@
-import { readJsonl, appendJsonl, latestBy, withJsonlQueue, writeJsonlLine } from './jsonl.mjs';
+import { readJsonl, latestBy, withJsonlQueue, writeJsonlLine } from './jsonl.mjs';
 
 const PAD = 4;
 const RUN_PREFIX = 'R-';
@@ -18,10 +18,16 @@ export async function getRun(paths, id) {
 }
 
 export async function createRun(paths, input, { now = defaultNow } = {}) {
-  const runs = await listRuns(paths);
-  const run = { id: nextRunId(runs), name: input.name, build: input.build, env: input.env, locale: input.locale, caseIds: [...input.caseIds], createdAt: now(), closedAt: null };
-  await appendJsonl(paths.runs, run);
-  return run;
+  // Computing the next id and appending it must be one atomic step, the same as every other
+  // read-modify-write cycle on a JSONL file, or two concurrent creates (a double click on
+  // "Create run") both read the same max id and mint the same one, and latest-wins on read
+  // silently drops one of them.
+  return withJsonlQueue(paths.runs, async () => {
+    const runs = await listRuns(paths);
+    const run = { id: nextRunId(runs), name: input.name, build: input.build, env: input.env, locale: input.locale, caseIds: [...input.caseIds], createdAt: now(), closedAt: null };
+    await writeJsonlLine(paths.runs, run);
+    return run;
+  });
 }
 
 const execKey = (e) => `${e.runId}|${e.caseId}`;

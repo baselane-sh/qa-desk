@@ -99,6 +99,7 @@ export function renderCaseDetail(c, state) {
 }
 
 export function renderCases(root, state, actions) {
+  if (state.bootError) { root.append(el('p', { class: 'empty error', text: `Could not load qa-desk: ${state.bootError}` })); return; }
   if (!state.config) { root.append(el('p', { class: 'empty', text: 'Loading' })); return; }
   const visible = state.cases.filter((c) => !c.supersededBy && matchesFilters(c, state.filters));
   const selected = state.cases.find((c) => c.id === state.selectedId);

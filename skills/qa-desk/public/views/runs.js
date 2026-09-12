@@ -58,6 +58,7 @@ function defectPanel(c, state, actions) {
 }
 
 export function renderRuns(root, state, actions) {
+  if (state.bootError) { root.append(el('p', { class: 'empty error', text: `Could not load qa-desk: ${state.bootError}` })); return; }
   if (!state.config) { root.append(el('p', { class: 'empty', text: 'Loading' })); return; }
   const left = el('aside', { class: 'pane' }, [el('h2', { text: 'Runs' }), runList(state, actions), newRunForm(state, actions)]);
   if (!state.run) {

@@ -1,11 +1,11 @@
 import { api } from './api.js';
 import { renderCases } from './views/cases.js';
 import { renderRuns } from './views/runs.js';
+import { hasModifier, keyToStatus } from './keys.js';
 
 const VIEWS = { cases: renderCases, runs: renderRuns };
-const KEY_STATUS = { p: 'passed', f: 'failed', b: 'blocked', s: 'skipped', r: 'retest' };
 
-let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], defect: null, log: '' };
+let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], defect: null, log: '', bootError: null };
 const root = document.getElementById('root');
 const toastEl = document.getElementById('toast');
 const runBadge = document.getElementById('run-badge');
@@ -110,18 +110,30 @@ function visibleIds() {
 
 function onKey(event) {
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) return;
+  if (hasModifier(event)) return;
   const ids = visibleIds();
   const i = ids.indexOf(state.selectedId);
   if (event.key === 'j' && ids.length) actions.select(ids[Math.min(i + 1, ids.length - 1)]);
   else if (event.key === 'k' && ids.length) actions.select(ids[Math.max(i - 1, 0)]);
-  else if (KEY_STATUS[event.key] && state.selectedId && state.run) actions.record(state.selectedId, { status: KEY_STATUS[event.key] });
+  else {
+    const status = keyToStatus(event);
+    if (status && state.selectedId && state.run) actions.record(state.selectedId, { status });
+  }
 }
 
 document.getElementById('tabs').addEventListener('click', (e) => { if (e.target.dataset.view) actions.setView(e.target.dataset.view); });
 document.addEventListener('keydown', onKey);
 
-guarded(async () => {
-  const [config, runs] = await Promise.all([api.get('/api/config'), api.get('/api/runs')]);
-  setState({ config, runs });
-  await loadCases();
-});
+async function boot() {
+  try {
+    const [config, runs] = await Promise.all([api.get('/api/config'), api.get('/api/runs')]);
+    setState({ config, runs });
+    await loadCases();
+  } catch (err) {
+    // A toast alone clears after 6 seconds and leaves the page stuck on "Loading" for ever
+    // with nothing on screen explaining why, so the failure is kept in state too.
+    setState({ bootError: err.message });
+    toast(err.message, true);
+  }
+}
+boot();

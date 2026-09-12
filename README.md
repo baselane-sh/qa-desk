@@ -67,13 +67,20 @@ a case superseded by hand when a rewritten case should replace an old one.
 | `branchPrefix` | `qa/` | fix branch is `qa/<issueId>` |
 | `port` | 4173 | |
 
+The `codex` argv default (`--agent codex`) has not been verified against a
+real `codex --help`. Check it yourself before the first dispatch.
+
 ## Security model
 
 The server binds 127.0.0.1 and refuses any other Host or Origin. Every child
 process runs with an argv array and no shell. The fix agent runs with broad
-permissions in its own git worktree on its own branch; nothing merges without
-you. The tester's "Actual result" is quoted to the agent as data, never as
-instructions.
+permissions; nothing merges without you. The tester's "Actual result" is
+quoted to the agent as data, never as instructions.
+
+The fix agent's prompt (`prompts/fix-agent.md`) tells it to work in its own
+git worktree on its own branch. That is an instruction to the agent, not a
+boundary the code enforces: qa-desk spawns it with the repository root as its
+working directory and never creates or checks the worktree itself.
 
 ## Development
 

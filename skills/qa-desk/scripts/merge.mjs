@@ -7,7 +7,10 @@ import { computeCoverage } from './lib/coverage.mjs';
 import { dataPaths } from './lib/paths.mjs';
 
 async function listOutFiles(outDir) {
-  try { return (await readdir(outDir)).filter((f) => f.endsWith('.json')).sort(); } catch (err) {
+  // A file this same function wrote as the rejected half of a partial merge (below) must
+  // never be read back as new input: nothing in it is valid, so every later merge would fail
+  // it again and print the same INVALID lines forever.
+  try { return (await readdir(outDir)).filter((f) => f.endsWith('.json') && !f.endsWith('.rejected.json')).sort(); } catch (err) {
     if (err.code === 'ENOENT') return [];
     throw err;
   }

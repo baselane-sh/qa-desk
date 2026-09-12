@@ -15,7 +15,9 @@ If `.qa-desk/config.json` does not exist:
 
     node <skill>/scripts/qa-desk.mjs init --agent claude
 
-Use `--agent codex` when Codex will run the fixes. Then:
+Use `--agent codex` when Codex will run the fixes; that default argv has not
+been verified against a real `codex --help`, so check it before the first
+dispatch. Then:
 
 1. Read the repository and fill each component's `sources` in `.qa-desk/config.json`: the screens, pages, API routes, functions, rules blocks, cron routes that a tester can exercise. Use repo-relative paths. A `path#block` anchor names one block inside a file. Add or rename components so each is one functional area.
 2. Ask the person one question: does the product have distinct user roles (for example admin, driver, guest)? If yes, set `roles`. If no, leave `roles` empty. Cases only carry `actors` when roles exist.
