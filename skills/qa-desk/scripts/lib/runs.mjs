@@ -57,17 +57,25 @@ export async function caseHistory(paths, caseId) {
   return (await readJsonl(paths.executions)).filter((e) => e.caseId === caseId);
 }
 
+/**
+ * The run read and the closedAt check must happen inside the runs queue, the
+ * same queue closeRun commits on, or a close committed between the check and
+ * the append can land after an execution the check had already let through.
+ * Nesting the executions queue inside the runs queue is safe: nothing in this
+ * codebase takes the executions queue and then the runs queue, so there is no
+ * lock inversion.
+ */
 export async function recordExecution(paths, { runId, caseId, ...patch }, { now = defaultNow, executedBy = 'unknown' } = {}) {
-  const run = await getRun(paths, runId);
-  if (!run) throw new Error(`unknown run ${runId}`);
-  if (!run.caseIds.includes(caseId)) throw new Error(`case ${caseId} is not in run ${runId}`);
-  if (run.closedAt) throw new Error(`run ${runId} is closed`);
-  return withJsonlQueue(paths.executions, async () => {
+  return withJsonlQueue(paths.runs, () => withJsonlQueue(paths.executions, async () => {
+    const run = await getRun(paths, runId);
+    if (!run) throw new Error(`unknown run ${runId}`);
+    if (!run.caseIds.includes(caseId)) throw new Error(`case ${caseId} is not in run ${runId}`);
+    if (run.closedAt) throw new Error(`run ${runId} is closed`);
     const previous = (await listExecutions(paths, runId)).get(caseId) ?? {};
     const execution = { ...previous, runId, caseId, env: previous.env ?? run.env, locale: previous.locale ?? run.locale, ...patch, executedBy, executedAt: now() };
     await writeJsonlLine(paths.executions, execution);
     return execution;
-  });
+  }));
 }
 
 /** Only the run's frozen caseIds count, so a later regeneration cannot move the numbers. */

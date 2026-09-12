@@ -47,8 +47,8 @@ function fenceFor(text) {
  * enough; only a fenced block may hold more than one line.
  */
 export function buildDefectBody({ case: c, run, execution, config }) {
-  const caseLines = [`Case: ${c.id}`, `Component: ${line(c.component)}`, `Priority: ${line(c.priority)}`, `Severity: ${line(c.severity)}`, `Type: ${c.type}`];
-  if (config.roles.length && c.actors?.length) caseLines.push(`Actors: ${c.actors.join(', ')}`);
+  const caseLines = [`Case: ${c.id}`, `Component: ${line(c.component)}`, `Priority: ${line(c.priority)}`, `Severity: ${line(c.severity)}`, `Type: ${line(c.type)}`];
+  if (config.roles.length && c.actors?.length) caseLines.push(`Actors: ${c.actors.map(line).join(', ')}`);
   if (c.references?.length) caseLines.push(`References: ${c.references.map(line).join(', ')}`);
   const actual = execution.actual?.trim() ? execution.actual.trim() : '(none)';
   const fence = fenceFor(actual);
@@ -57,8 +57,8 @@ export function buildDefectBody({ case: c, run, execution, config }) {
   return [
     '## Summary', line(c.objective || c.title),
     '', '## Environment',
-    `Build: ${line(run.build)}`, `Environment: ${execution.env ?? run.env}`, `Locale: ${execution.locale ?? run.locale}`,
-    `Executed by: ${execution.executedBy}`, `Executed at: ${execution.executedAt}`,
+    `Build: ${line(run.build)}`, `Environment: ${line(execution.env ?? run.env)}`, `Locale: ${line(execution.locale ?? run.locale)}`,
+    `Executed by: ${line(execution.executedBy)}`, `Executed at: ${execution.executedAt}`,
     '', '## Case', caseLines.join('\n'),
     '', '## Preconditions', bullets(c.preconditions),
     ...(c.testData ? ['', '## Test data', line(c.testData)] : []),

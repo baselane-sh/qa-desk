@@ -72,6 +72,26 @@ test('closeRun stamps closedAt once and a closed run takes no more executions', 
   await assert.rejects(recordExecution(p, { runId: 'R-0001', caseId: 'QA-0001', status: 'passed' }, { now }), /run R-0001 is closed/);
 });
 
+test('recordExecution and closeRun cannot race: a run that ends up closed never gains an execution stamped after it', async () => {
+  for (let iter = 0; iter < 20; iter += 1) {
+    const p = await paths();
+    let tick = 0;
+    const clock = () => tick++;
+    const run = await createRun(p, input, { now: clock });
+    const exec = () => recordExecution(p, { runId: run.id, caseId: 'QA-0001', status: 'passed' }, { now: clock, executedBy: 'mo' });
+    const close = () => closeRun(p, run.id, { now: clock });
+    // Alternate which call is issued first so both orderings are exercised across iterations.
+    const calls = iter % 2 === 0 ? [exec(), close()] : [close(), exec()];
+    await Promise.allSettled(calls);
+    const finalRun = await getRun(p, run.id);
+    const execution = (await listExecutions(p, run.id)).get('QA-0001');
+    if (finalRun.closedAt !== null && execution) {
+      assert.ok(execution.executedAt < finalRun.closedAt,
+        `iteration ${iter}: execution stamped at ${execution.executedAt} after the run closed at ${finalRun.closedAt}`);
+    }
+  }
+});
+
 test('runSummary counts every status and derives untested from absence', async () => {
   const p = await paths();
   const run = await createRun(p, { ...input, caseIds: ['QA-0001', 'QA-0002', 'QA-0003'] }, { now });

@@ -208,9 +208,10 @@ test('execFileWithInput writes stdin and surfaces stderr on failure', async () =
   await assert.rejects(execFileWithInput('sh', ['-c', 'echo bad >&2; exit 3'], {}), (e) => /bad/.test(e.stderr));
 });
 
-test('an execution carries evidence and an env override into the defect body', async () => {
+test('an execution carries evidence and an env override into the defect body', async (t) => {
   const created = [];
   const s = await boot({ tracker: { name: 'github', create: async (x) => { created.push(x); return { id: '21', url: 'https://github.com/o/r/issues/21' }; }, show: async () => ({ id: '21', url: 'u', state: 'open', notes: '' }) } });
+  t.after(() => s.close());
   await makeRun(s);
   const e = await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'failed', actual: 'boom', evidence: 'logs/app.log line 42', env: 'prod', locale: 'any' });
   assert.equal(e.status, 200, JSON.stringify(e.body));
@@ -223,7 +224,6 @@ test('an execution carries evidence and an env override into the defect body', a
   assert.match(created[0].body, /Locale: any/);
   assert.match(created[0].body, /## Evidence\n/);
   assert.match(created[0].body, /logs\/app\.log line 42/);
-  await s.close();
 });
 
 test('runs carry a status summary in the list and in the detail', async (t) => {
@@ -240,8 +240,9 @@ test('runs carry a status summary in the list and in the detail', async (t) => {
   assert.equal(one.body.data.executions['QA-0001'].status, 'passed');
 });
 
-test('GET /api/cases attaches the latest execution per open run and drops closed runs', async () => {
+test('GET /api/cases attaches the latest execution per open run and drops closed runs', async (t) => {
   const s = await boot();
+  t.after(() => s.close());
   await makeRun(s, ['QA-0001']);
   await makeRun(s, ['QA-0001', 'QA-0002']);
   await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'passed' });
@@ -257,11 +258,11 @@ test('GET /api/cases attaches the latest execution per open run and drops closed
   const inRun = (await s.call('GET', '/api/cases?runId=R-0002')).body.data;
   assert.equal(inRun[0].latestByRun, undefined);
   assert.equal(inRun[0].execution, null);
-  await s.close();
 });
 
-test('case history carries the run name across runs', async () => {
+test('case history carries the run name across runs', async (t) => {
   const s = await boot();
+  t.after(() => s.close());
   await makeRun(s);
   await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'failed', actual: 'boom' });
   await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'retest' });
