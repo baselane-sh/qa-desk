@@ -9,6 +9,14 @@ export function visibleRuns(runs, { showClosed = false, selectedId = null } = {}
   return [...runs].reverse().filter((r) => showClosed || !isClosed(r) || r.id === selectedId);
 }
 
+export function executionDefaults(c, run) {
+  return { env: c.execution?.env ?? run.env, locale: c.execution?.locale ?? run.locale };
+}
+
+export function needsStatusFirst(c) {
+  return statusOf(c) === 'untested';
+}
+
 function newRunForm(state, actions) {
   const { config } = state;
   const name = el('input', { placeholder: 'Sprint 12 regression' });
@@ -62,13 +70,38 @@ function closedExecutionPanel(c, state) {
   ]);
 }
 
+function pickList(values, current, locked, onchange) {
+  const box = el('select', { onchange: (e) => onchange(e.target.value) }, values.map((v) => el('option', { value: v, text: v })));
+  box.value = current;
+  box.disabled = locked;
+  return box;
+}
+
 function executionPanel(c, state, actions) {
   const status = statusOf(c);
+  const locked = needsStatusFirst(c);
+  const lock = locked ? 'disabled' : null;
+  const { env, locale } = executionDefaults(c, state.run);
   const buttons = el('div', { class: 'verdicts' }, STATUSES.map((s) => el('button', { class: `status-btn ${s === status ? 'on' : ''}`, text: s, onclick: () => actions.record(c.id, { status: s }) })));
-  const actual = el('textarea', { placeholder: 'Actual result: what you saw, step number, error text', onblur: (e) => { if (e.target.value !== (c.execution?.actual ?? '')) actions.record(c.id, { actual: e.target.value }); } });
+  const actual = el('textarea', { placeholder: 'Actual result: what you saw, step number, error text', disabled: lock, onblur: (e) => { if (e.target.value !== (c.execution?.actual ?? '')) actions.record(c.id, { actual: e.target.value }); } });
   actual.value = c.execution?.actual ?? '';
-  const duration = el('input', { type: 'number', min: '0', placeholder: 'seconds', value: c.execution?.durationSec ?? '', onblur: (e) => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= 0 && v !== c.execution?.durationSec) actions.record(c.id, { durationSec: v }); } });
-  return el('div', {}, [el('h4', { text: `Execution in ${state.run.id}` }), buttons, el('label', { text: 'Actual result' }, [actual]), el('label', { text: 'Duration (s)', style: 'width:140px' }, [duration])]);
+  const evidence = el('textarea', { placeholder: 'Evidence: links or paths to screenshots, logs or recordings', disabled: lock, onblur: (e) => { if (e.target.value !== (c.execution?.evidence ?? '')) actions.record(c.id, { evidence: e.target.value }); } });
+  evidence.value = c.execution?.evidence ?? '';
+  const duration = el('input', { type: 'number', min: '0', placeholder: 'seconds', value: c.execution?.durationSec ?? '', disabled: lock, onblur: (e) => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= 0 && v !== c.execution?.durationSec) actions.record(c.id, { durationSec: v }); } });
+  const envBox = pickList([...state.config.environments, 'any'], env, locked, (v) => actions.record(c.id, { env: v }));
+  const localeBox = pickList([...state.config.locales, 'any'], locale, locked, (v) => actions.record(c.id, { locale: v }));
+  return el('div', {}, [
+    el('h4', { text: `Execution in ${state.run.id}` }),
+    buttons,
+    locked ? el('p', { class: 'muted', text: 'Record a status first. The details below open once this case has an execution.' }) : null,
+    el('label', { text: 'Actual result' }, [actual]),
+    el('label', { text: 'Evidence' }, [evidence]),
+    el('div', { class: 'fields' }, [
+      el('label', { text: 'Duration (s)' }, [duration]),
+      el('label', { text: 'Environment' }, [envBox]),
+      el('label', { text: 'Locale' }, [localeBox]),
+    ]),
+  ]);
 }
 
 function defectPanel(c, state, actions) {

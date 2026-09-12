@@ -75,3 +75,14 @@ test('the UI never opens a browser dialog', async () => {
     assert.doesNotMatch(text, /\b(?:alert|confirm|prompt)\s*\(/, `${f} opens a browser dialog`);
   }
 });
+
+test('execution detail editors default to the run values and stay locked until a status exists', async () => {
+  const { executionDefaults, needsStatusFirst } = await import('../public/views/runs.js');
+  const run = { id: 'R-0001', env: 'staging', locale: 'en' };
+  assert.deepEqual(executionDefaults({ id: 'QA-0001' }, run), { env: 'staging', locale: 'en' });
+  assert.deepEqual(executionDefaults({ id: 'QA-0001', execution: { status: 'failed' } }, run), { env: 'staging', locale: 'en' });
+  assert.deepEqual(executionDefaults({ id: 'QA-0001', execution: { status: 'failed', env: 'prod', locale: 'any' } }, run), { env: 'prod', locale: 'any' });
+  assert.equal(needsStatusFirst({ id: 'QA-0001' }), true);
+  assert.equal(needsStatusFirst({ id: 'QA-0001', execution: null }), true);
+  assert.equal(needsStatusFirst({ id: 'QA-0001', execution: { status: 'passed' } }), false);
+});
