@@ -1,3 +1,5 @@
+import { isDefaultFilters } from '../filters-store.js';
+
 const STATUSES = ['passed', 'failed', 'blocked', 'skipped', 'retest'];
 
 const el = (tag, attrs = {}, children = []) => {
@@ -54,20 +56,37 @@ function select(label, key, options, value, onchange) {
   return el('label', { text: label }, [s]);
 }
 
+const FILTER_LABELS = { component: 'Component', role: 'Role', type: 'Type', priority: 'Priority', severity: 'Severity', env: 'Environment', locale: 'Locale', automation: 'Automation', status: 'Status', tag: 'Tag' };
+const FILTER_ORDER = ['component', 'role', 'type', 'priority', 'severity', 'env', 'locale', 'automation', 'status', 'tag'];
+
+// The single source of truth for what each filter select offers. Used both to render the
+// selects here and, in app.js, to build the `allowed` map that sanitizeFilters checks a
+// restored filter set against, so a saved value only survives when its select still offers it.
+export function filterOptions(state) {
+  const { config } = state;
+  const opts = {
+    component: config.components.map((c) => c.name),
+    type: config.types,
+    priority: config.priorities,
+    severity: config.severities,
+    env: [...config.environments, 'any'],
+    locale: [...config.locales, 'any'],
+    automation: ['manual', 'candidate', 'automated'],
+    status: ['untested', ...STATUSES],
+  };
+  if (config.roles.length) opts.role = config.roles;
+  const tags = [...new Set(state.cases.flatMap((c) => c.tags ?? []))].sort();
+  if (tags.length) opts.tag = tags;
+  return opts;
+}
+
 export function renderFilters(state, actions) {
-  const { config, filters } = state;
+  const { filters } = state;
   const set = (key, value) => actions.setFilters({ ...filters, [key]: value || undefined });
   const q = el('input', { 'data-focus-key': 'q', placeholder: 'Search id, title, objective', value: filters.q ?? '', oninput: (e) => actions.setSearch(e.target.value) });
-  const lists = [
-    ['Component', 'component', config.components.map((c) => c.name)],
-    ...(config.roles.length ? [['Role', 'role', config.roles]] : []),
-    ['Type', 'type', config.types], ['Priority', 'priority', config.priorities], ['Severity', 'severity', config.severities],
-    ['Environment', 'env', [...config.environments, 'any']], ['Locale', 'locale', [...config.locales, 'any']],
-    ['Automation', 'automation', ['manual', 'candidate', 'automated']], ['Status', 'status', ['untested', ...STATUSES]],
-  ];
-  const tags = [...new Set(state.cases.flatMap((c) => c.tags ?? []))].sort();
-  if (tags.length) lists.push(['Tag', 'tag', tags]);
-  return el('div', { class: 'filters' }, [el('label', { text: 'Search' }, [q]), ...lists.map(([label, key, opts]) => select(label, key, opts, filters[key], set))]);
+  const opts = filterOptions(state);
+  const selects = FILTER_ORDER.filter((key) => opts[key]).map((key) => select(FILTER_LABELS[key], key, opts[key], filters[key], set));
+  return el('div', { class: 'filters' }, [el('label', { text: 'Search' }, [q]), ...selects]);
 }
 
 export function renderProgress(state, groupKey = 'component') {
@@ -84,8 +103,20 @@ export function renderProgress(state, groupKey = 'component') {
   }));
 }
 
-export function renderList(state, actions, cases) {
-  if (!cases.length) return el('p', { class: 'empty', text: 'No cases match' });
+export function renderList(state, actions, cases, total) {
+  if (!cases.length) {
+    if (!total) {
+      return el('div', { class: 'empty' }, [
+        el('p', { text: 'No cases yet.' }),
+        el('p', { text: 'Run qa-desk generate, then qa-desk merge.' }),
+        el('button', { text: 'Reload', onclick: () => actions.reload() }),
+      ]);
+    }
+    return el('div', { class: 'empty' }, [
+      el('p', { text: 'No case matches the filters.' }),
+      el('button', { text: 'Clear filters', onclick: () => actions.clearFilters() }),
+    ]);
+  }
   return el('ul', { class: 'list' }, cases.map((c) => {
     const badges = runBadges(c);
     return el('li', { 'data-id': c.id, class: c.id === state.selectedId ? 'selected' : '', onclick: () => actions.select(c.id) }, [
@@ -108,6 +139,7 @@ export function renderCaseDetail(c, state) {
   ]);
   const history = el('ul', { class: 'history list' }, state.history.length ? state.history.map((h) => el('li', { text: historyLine(h) })) : [el('li', { text: 'No executions yet' })]);
   return el('div', { class: 'detail' }, [
+    matchesFilters(c, state.filters) ? null : el('p', { class: 'warn', text: 'This case is hidden by the current filters.' }),
     el('h3', { text: `${c.id} ${c.title}` }),
     el('p', { text: c.objective ?? '' }),
     kv([['Component', c.component], ['Actors', c.actors], ['Type', c.type], ['Priority', c.priority], ['Severity', c.severity], ['Environment', c.env], ['Locale', c.locale], ['Automation', c.automation], ['Estimate', c.estimateMinutes ? `${c.estimateMinutes} min` : undefined], ['References', c.references], ['Tags', c.tags]]),
@@ -121,13 +153,24 @@ export function renderCaseDetail(c, state) {
 }
 
 export function renderCases(root, state, actions) {
-  if (state.bootError) { root.append(el('p', { class: 'empty error', text: `Could not load qa-desk: ${state.bootError}` })); return; }
+  if (state.bootError) {
+    root.append(el('div', { class: 'empty error' }, [
+      el('p', { text: `Could not load qa-desk: ${state.bootError}` }),
+      el('button', { text: 'Retry', onclick: () => actions.reload() }),
+    ]));
+    return;
+  }
   if (!state.config) { root.append(el('p', { class: 'empty', text: 'Loading' })); return; }
+  const total = state.cases.filter((c) => !c.supersededBy).length;
   const visible = state.cases.filter((c) => !c.supersededBy && matchesFilters(c, state.filters));
   const selected = state.cases.find((c) => c.id === state.selectedId);
+  const filtersHead = el('div', { class: 'pane-head' }, [
+    el('h2', { text: 'Filters' }),
+    isDefaultFilters(state.filters) ? null : el('button', { text: 'Clear', onclick: () => actions.clearFilters() }),
+  ]);
   root.append(
-    el('aside', { class: 'pane', 'data-pane': 'filters' }, [el('h2', { text: 'Filters' }), renderFilters(state, actions), el('h2', { text: 'Progress', style: 'margin-top:16px' }), renderProgress(state)]),
-    el('section', { class: 'pane', 'data-pane': 'list' }, [el('h2', { text: `Cases (${visible.length})` }), renderList(state, actions, visible)]),
+    el('aside', { class: 'pane', 'data-pane': 'filters' }, [filtersHead, renderFilters(state, actions), el('h2', { text: 'Progress', style: 'margin-top:16px' }), renderProgress(state)]),
+    el('section', { class: 'pane', 'data-pane': 'list' }, [el('h2', { text: `Cases (${visible.length})` }), renderList(state, actions, visible, total)]),
     el('section', { class: 'pane', 'data-pane': 'detail' }, selected ? [renderCaseDetail(selected, state)] : [el('p', { class: 'empty', text: 'Select a case. Keys: j/k move, p f b s r record in the current run.' })]),
   );
 }

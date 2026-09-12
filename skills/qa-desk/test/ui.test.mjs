@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const read = (rel) => readFile(new URL(`../public/${rel}`, import.meta.url), 'utf8');
-const FILES = ['index.html', 'style.css', 'api.js', 'app.js', 'keys.js', 'views/cases.js', 'views/runs.js'];
+const FILES = ['index.html', 'style.css', 'api.js', 'app.js', 'keys.js', 'filters-store.js', 'views/cases.js', 'views/runs.js'];
 
 test('every UI file exists and stays under 800 lines', async () => {
   for (const f of FILES) {
@@ -224,4 +224,35 @@ test('the key legend in index.html names every bound key', async () => {
   for (const k of ['j', 'k', 'p', 'f', 'b', 's', 'r', 'u', 'Enter', 'Esc', '?']) {
     assert.match(html, new RegExp(`<kbd>${k.replace('?', '\\?')}</kbd>`), `legend is missing ${k}`);
   }
+});
+
+test('sanitizeFilters drops values the current case set no longer has', async () => {
+  const { sanitizeFilters } = await import('../public/filters-store.js');
+  const allowed = { component: ['auth'], priority: ['P0', 'P1'], status: ['untested', 'passed'] };
+  assert.deepEqual(sanitizeFilters({ component: 'auth', priority: 'P0' }, allowed), { component: 'auth', priority: 'P0' });
+  assert.deepEqual(sanitizeFilters({ component: 'gone', priority: 'P1' }, allowed), { priority: 'P1' });
+  assert.deepEqual(sanitizeFilters({ q: 'otp' }, allowed), { q: 'otp' });
+  assert.deepEqual(sanitizeFilters({ nonsense: 'x' }, allowed), {});
+  assert.deepEqual(sanitizeFilters(null, allowed), {});
+  assert.deepEqual(sanitizeFilters({ q: 42 }, allowed), {});
+});
+
+test('isDefaultFilters knows an untouched filter set', async () => {
+  const { isDefaultFilters } = await import('../public/filters-store.js');
+  assert.equal(isDefaultFilters({}), true);
+  assert.equal(isDefaultFilters({ q: '', component: undefined }), true);
+  assert.equal(isDefaultFilters({ component: 'auth' }), false);
+  assert.equal(isDefaultFilters({ q: 'x' }), false);
+});
+
+test('loadFilters and saveFilters survive a broken store', async () => {
+  const { loadFilters, saveFilters } = await import('../public/filters-store.js');
+  const allowed = { component: ['auth'] };
+  const good = { getItem: () => JSON.stringify({ component: 'auth' }), setItem() {} };
+  assert.deepEqual(loadFilters(good, allowed), { component: 'auth' });
+  const broken = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
+  assert.deepEqual(loadFilters(broken, allowed), {});
+  assert.doesNotThrow(() => saveFilters(broken, { component: 'auth' }));
+  const garbage = { getItem: () => '{not json', setItem() {} };
+  assert.deepEqual(loadFilters(garbage, allowed), {});
 });

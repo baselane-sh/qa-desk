@@ -1,7 +1,8 @@
 import { api } from './api.js';
-import { renderCases, el } from './views/cases.js';
+import { renderCases, el, filterOptions } from './views/cases.js';
 import { renderRuns } from './views/runs.js';
 import { nextIndex, debounce, keyAction } from './keys.js';
+import { loadFilters, saveFilters } from './filters-store.js';
 
 const VIEWS = { cases: renderCases, runs: renderRuns };
 
@@ -127,14 +128,24 @@ async function closeCurrentRun(runId) {
   toast(`Closed ${runId}`);
 }
 
+// Every filter change is persisted, not just the ones made through a select: setFilters
+// covers the selects, and setSearch (below) routes through this too, so the search box
+// sticks across a reload exactly like every other filter.
+function commitFilters(filters) {
+  saveFilters(window.localStorage, filters);
+  setState({ filters });
+}
+
 // Built once so the debounce timer survives redraws; rebuilding it on every render would
 // reset the timer on every keystroke and the search box would never fire.
-const setSearchDebounced = debounce((q) => setState({ filters: { ...state.filters, q: q || undefined } }), 140);
+const setSearchDebounced = debounce((q) => commitFilters({ ...state.filters, q: q || undefined }), 140);
 
 const actions = {
   select: (id) => guarded(() => selectCase(id)),
-  setFilters: (filters) => setState({ filters }),
+  setFilters: (filters) => commitFilters(filters),
+  clearFilters: () => commitFilters({}),
   setSearch: (q) => setSearchDebounced(q),
+  reload: () => boot(),
   record: (caseId, patch) => guarded(() => record(caseId, patch)),
   undo: () => guarded(() => undo(state.selectedId)),
   openDefect: (caseId) => guarded(() => openDefect(caseId)),
@@ -241,8 +252,11 @@ document.addEventListener('keydown', onKey);
 async function boot() {
   try {
     const [config, runs] = await Promise.all([api.get('/api/config'), api.get('/api/runs')]);
-    setState({ config, runs });
+    setState({ config, runs, bootError: null });
     await loadCases();
+    // sanitizeFilters needs both the config lists and the tags derived from the loaded
+    // cases, so a saved filter set can only be trusted once both are in state.
+    setState({ filters: loadFilters(window.localStorage, filterOptions(state)) });
   } catch (err) {
     // A toast alone clears after 6 seconds and leaves the page stuck on "Loading" for ever
     // with nothing on screen explaining why, so the failure is kept in state too.
