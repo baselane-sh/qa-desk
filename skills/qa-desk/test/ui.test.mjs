@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const read = (rel) => readFile(new URL(`../public/${rel}`, import.meta.url), 'utf8');
-const FILES = ['index.html', 'style.css', 'api.js', 'app.js', 'keys.js', 'filters-store.js', 'ui-restore.js', 'status.js', 'views/cases.js', 'views/runs.js'];
+const FILES = ['index.html', 'style.css', 'api.js', 'app.js', 'keys.js', 'filters-store.js', 'ui-restore.js', 'status.js', 'chips.js', 'icons.js', 'views/cases.js', 'views/runs.js'];
 
 test('every UI file exists and stays under 800 lines', async () => {
   for (const f of FILES) {
@@ -425,6 +425,37 @@ test('a running dispatch is polled every 5000ms, and the poll is cleared before 
   assert.match(selectCaseBody, /clearPoll\(\);/, 'switching cases must clear any earlier poll');
   const selectRunBody = text.slice(text.indexOf('async function selectRun('), text.indexOf('let recordToken'));
   assert.match(selectRunBody, /clearPoll\(\);/, 'switching runs must clear any earlier poll');
+});
+
+test('chipsFor labels a case with one chip per fact and a class per value', async () => {
+  const { chipsFor } = await import('../public/chips.js');
+  const chips = chipsFor({ priority: 'P0', severity: 'critical', type: 'security', automation: 'manual', tags: ['smoke'] });
+  assert.deepEqual(chips.map((x) => x.text), ['P0', 'critical', 'security', 'smoke']);
+  assert.equal(chips[0].className, 'chip p0');
+  assert.equal(chips[1].className, 'chip sev-critical');
+  assert.equal(chips[2].className, 'chip kind');
+  assert.equal(chips[3].className, 'chip tag');
+  // automation shows only when it is not the default
+  assert.equal(chipsFor({ priority: 'P2', severity: 'minor', type: 'functional', automation: 'automated', tags: [] }).some((x) => x.text === 'automated'), true);
+  assert.deepEqual(chipsFor({}).map((x) => x.text), []);
+});
+
+test('the stylesheet defines a colour for every priority and severity chip', async () => {
+  const css = await read('style.css');
+  for (const cls of ['.chip.p0', '.chip.p1', '.chip.p2', '.chip.p3', '.chip.sev-critical', '.chip.sev-major', '.chip.sev-minor']) {
+    assert.ok(css.includes(cls), `style.css has no rule for ${cls}`);
+  }
+});
+
+test('index.html carries an inline favicon and an svg sprite, and loads nothing from a network', async () => {
+  const html = await read('index.html');
+  assert.match(html, /<link rel="icon"[^>]+data:image\/svg\+xml/);
+  for (const id of ['i-search', 'i-chevron', 'i-external']) assert.ok(html.includes(`id="${id}"`), `sprite is missing ${id}`);
+  // The favicon is a standalone data-URI SVG image, which must declare its own xmlns to
+  // render outside the HTML parser's foreign-content handling; that attribute value contains
+  // "http://", so the network-free check below looks for an actual external src/href scheme
+  // right after the opening quote, rather than banning the substring "http://" anywhere at all.
+  assert.doesNotMatch(html, /(?:src|href)\s*=\s*"https?:\/\//);
 });
 
 test('a failed fetch reports offline; any answer reports online again', async () => {

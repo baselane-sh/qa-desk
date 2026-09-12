@@ -1,5 +1,7 @@
 import { isDefaultFilters } from '../filters-store.js';
 import { tallyLabel } from '../status.js';
+import { chipsFor } from '../chips.js';
+import { icon } from '../icons.js';
 
 const STATUSES = ['passed', 'failed', 'blocked', 'skipped', 'retest'];
 
@@ -85,9 +87,10 @@ export function renderFilters(state, actions) {
   const { filters } = state;
   const set = (key, value) => actions.setFilters({ ...filters, [key]: value || undefined });
   const q = el('input', { 'data-focus-key': 'q', placeholder: 'Search id, title, objective', value: filters.q ?? '', oninput: (e) => actions.setSearch(e.target.value) });
+  const searchBox = el('div', { class: 'search-box' }, [icon('search'), q]);
   const opts = filterOptions(state);
   const selects = FILTER_ORDER.filter((key) => opts[key]).map((key) => select(FILTER_LABELS[key], key, opts[key], filters[key], set));
-  return el('div', { class: 'filters' }, [el('label', { text: 'Search' }, [q]), ...selects]);
+  return el('div', { class: 'filters' }, [el('label', { text: 'Search' }, [searchBox]), ...selects]);
 }
 
 // The words behind each bar's aria-label, e.g. "auth: 4 passed, 1 failed, 7 untested of 12".
@@ -148,10 +151,16 @@ export function renderList(state, actions, cases, total) {
   }
   return el('ul', { class: 'list' }, cases.map((c) => {
     const badges = runBadges(c);
+    const status = statusOf(c);
+    const chips = chipsFor(c);
     return el('li', { 'data-id': c.id, class: c.id === state.selectedId ? 'selected' : '', onclick: () => actions.select(c.id) }, [
-      el('span', { text: `${c.id} ${c.title}` }),
-      el('span', { class: `status ${statusOf(c)}`, text: statusOf(c) }),
-      el('span', { class: 'meta', text: [c.component, c.priority, c.severity, c.type, ...(c.actors ?? [])].join(' · ') }),
+      el('span', { class: 'title-row' }, [
+        el('span', { class: `verdict-dot ${status}`, title: status }),
+        el('span', { class: 'case-id tabular', text: c.id }),
+        el('span', { class: 'case-title', text: c.title }),
+      ]),
+      el('span', { class: 'meta', text: [c.component, ...(c.actors ?? [])].join(' · ') }),
+      chips.length ? el('span', { class: 'chips' }, chips.map((x) => el('span', { class: x.className, text: x.text }))) : null,
       badges.length ? el('span', { class: 'meta' }, badges.map((b) => el('span', { class: `status ${b.status}`, title: b.runId, text: `${b.runId} ${b.status}` }))) : null,
     ]);
   }));
@@ -164,21 +173,31 @@ function kv(pairs) {
 export function renderCaseDetail(c, state) {
   const steps = el('table', { class: 'steps' }, [
     el('thead', {}, [el('tr', {}, [el('th', { text: '#' }), el('th', { text: 'Action' }), el('th', { text: 'Expected' })])]),
-    el('tbody', {}, c.steps.map((s, i) => el('tr', {}, [el('td', { text: String(i + 1) }), el('td', { text: s.data ? `${s.action}\nData: ${s.data}` : s.action, style: 'white-space:pre-wrap' }), el('td', { text: s.expected })]))),
+    el('tbody', {}, c.steps.map((s, i) => el('tr', {}, [el('td', { text: String(i + 1) }), el('td', { text: s.data ? `${s.action}\nData: ${s.data}` : s.action, style: 'white-space:pre-wrap', dir: 'auto' }), el('td', { text: s.expected, dir: 'auto' })]))),
   ]);
   const history = el('ul', { class: 'history list' }, state.history.length ? state.history.map((h) => el('li', { text: historyLine(h) })) : [el('li', { text: 'No executions yet' })]);
-  return el('div', { class: 'detail' }, [
+  const head = el('div', { class: 'detail-head' }, [
     matchesFilters(c, state.filters) ? null : el('p', { class: 'warn', text: 'This case is hidden by the current filters.' }),
-    el('h3', { text: `${c.id} ${c.title}` }),
+    el('h3', {}, [el('span', { class: 'tabular', text: c.id }), ' ', el('span', { dir: 'auto', text: c.title })]),
+  ]);
+  return el('div', { class: 'detail' }, [
+    head,
     el('p', { text: c.objective ?? '' }),
     kv([['Component', c.component], ['Actors', c.actors], ['Type', c.type], ['Priority', c.priority], ['Severity', c.severity], ['Environment', c.env], ['Locale', c.locale], ['Automation', c.automation], ['Estimate', c.estimateMinutes ? `${c.estimateMinutes} min` : undefined], ['References', c.references], ['Tags', c.tags]]),
-    el('h4', { text: 'Preconditions' }), el('ul', {}, (c.preconditions.length ? c.preconditions : ['none']).map((p) => el('li', { text: p }))),
+    el('h4', { text: 'Preconditions' }), el('ul', {}, (c.preconditions.length ? c.preconditions : ['none']).map((p) => el('li', { text: p, dir: 'auto' }))),
     c.testData ? el('p', { text: `Test data: ${c.testData}` }) : null,
     el('h4', { text: 'Steps' }), steps,
-    c.postconditions?.length ? el('div', {}, [el('h4', { text: 'Postconditions' }), el('ul', {}, c.postconditions.map((p) => el('li', { text: p })))]) : null,
+    c.postconditions?.length ? el('div', {}, [el('h4', { text: 'Postconditions' }), el('ul', {}, c.postconditions.map((p) => el('li', { text: p, dir: 'auto' })))]) : null,
     el('h4', { text: 'Source' }), el('ul', {}, c.source.map((s) => el('li', {}, [el('code', { text: s })]))),
     el('h4', { text: 'History' }), history,
   ]);
+}
+
+// Below the two-column breakpoint the filters pane is hidden behind this button, which just
+// flips a CSS class on the pane it is not itself part of (it lives in the list pane's
+// pane-head, which stays visible, so it can still be reached once the filters pane is hidden).
+export function filtersToggleButton() {
+  return el('button', { class: 'filters-toggle', text: 'Filters', onclick: () => document.querySelector('[data-pane="filters"]')?.classList.toggle('open') });
 }
 
 export function renderCases(root, state, actions) {
@@ -199,7 +218,7 @@ export function renderCases(root, state, actions) {
   ]);
   root.append(
     el('aside', { class: 'pane', 'data-pane': 'filters' }, [filtersHead, renderFilters(state, actions), el('h2', { text: 'Progress', style: 'margin-top:16px' }), renderProgress(state)]),
-    el('section', { class: 'pane', 'data-pane': 'list' }, [el('h2', { text: tallyLabel({ visible: visible.length, total, counts: tallyCounts(visible) }) }), renderList(state, actions, visible, total)]),
+    el('section', { class: 'pane', 'data-pane': 'list' }, [el('div', { class: 'pane-head' }, [el('h2', { text: tallyLabel({ visible: visible.length, total, counts: tallyCounts(visible) }) }), filtersToggleButton()]), renderList(state, actions, visible, total)]),
     el('section', { class: 'pane', 'data-pane': 'detail' }, selected ? [renderCaseDetail(selected, state)] : [el('p', { class: 'empty', text: 'Select a case. Keys: j/k move, p f b s r record in the current run.' })]),
   );
 }

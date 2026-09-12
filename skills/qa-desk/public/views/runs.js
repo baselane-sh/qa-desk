@@ -1,5 +1,6 @@
-import { el, renderList, renderProgress, renderCaseDetail, matchesFilters, statusOf } from './cases.js';
+import { el, renderList, renderProgress, renderCaseDetail, matchesFilters, statusOf, filtersToggleButton } from './cases.js';
 import { saveStateLabel, fieldValue } from '../status.js';
+import { icon } from '../icons.js';
 
 const STATUSES = ['passed', 'failed', 'blocked', 'skipped', 'retest'];
 const DEFECT_STATUSES = ['failed', 'blocked'];
@@ -101,7 +102,7 @@ function runList(state, actions) {
     return el('div', {}, [bar, el('p', { class: 'empty', text: state.runs.length ? 'Every run is closed' : 'No runs yet' })]);
   }
   const items = rows.map((r) => el('li', { class: state.run?.id === r.id ? 'selected' : '', onclick: () => actions.selectRun(r) }, [
-    el('span', { text: `${r.id} ${r.name}` }),
+    el('span', {}, [el('span', { class: 'tabular', text: r.id }), ` ${r.name}`]),
     isClosed(r) ? el('span', { class: 'badge closed', text: 'Closed' }) : el('span', { class: 'badge', text: summaryLabel(r.summary) || `${r.caseIds.length} cases` }),
     el('span', { class: 'meta', text: `${r.build} · ${r.env} · ${r.createdAt.slice(0, 10)}` }),
   ]));
@@ -145,8 +146,8 @@ function closedExecutionPanel(c, state) {
     el('h4', { text: `Execution in ${state.run.id}` }),
     el('p', {}, [el('span', { class: `status ${statusOf(c)}`, text: statusOf(c) })]),
     el('p', { class: 'muted', text: 'This run is closed. Its executions cannot be changed.' }),
-    execution?.actual ? el('div', {}, [el('h4', { text: 'Actual result' }), el('pre', { class: 'quote', text: execution.actual })]) : null,
-    execution?.evidence ? el('div', {}, [el('h4', { text: 'Evidence' }), el('pre', { class: 'quote', text: execution.evidence })]) : null,
+    execution?.actual ? el('div', {}, [el('h4', { text: 'Actual result' }), el('pre', { class: 'quote', text: execution.actual, dir: 'auto' })]) : null,
+    execution?.evidence ? el('div', {}, [el('h4', { text: 'Evidence' }), el('pre', { class: 'quote', text: execution.evidence, dir: 'auto' })]) : null,
   ]);
 }
 
@@ -169,9 +170,9 @@ function executionPanel(c, state, actions) {
   const lock = locked ? 'disabled' : null;
   const { env, locale } = executionDefaults(c, state.run);
   const buttons = el('div', { class: 'verdicts' }, STATUSES.map((s) => el('button', { class: `status-btn ${s === status ? 'on' : ''}`, text: s, onclick: () => actions.record(c.id, { status: s }) }, [el('kbd', { text: s[0] })])));
-  const actual = el('textarea', { 'data-focus-key': 'actual', placeholder: 'Actual result: what you saw, step number, error text', disabled: lock, onblur: (e) => { if (e.target.value !== (c.execution?.actual ?? '')) actions.record(c.id, { actual: e.target.value }); } });
+  const actual = el('textarea', { 'data-focus-key': 'actual', dir: 'auto', placeholder: 'Actual result: what you saw, step number, error text', disabled: lock, onblur: (e) => { if (e.target.value !== (c.execution?.actual ?? '')) actions.record(c.id, { actual: e.target.value }); } });
   actual.value = fieldValue(state.saveState, c.execution, 'actual');
-  const evidence = el('textarea', { 'data-focus-key': 'evidence', placeholder: 'Evidence: links or paths to screenshots, logs or recordings', disabled: lock, onblur: (e) => { if (e.target.value !== (c.execution?.evidence ?? '')) actions.record(c.id, { evidence: e.target.value }); } });
+  const evidence = el('textarea', { 'data-focus-key': 'evidence', dir: 'auto', placeholder: 'Evidence: links or paths to screenshots, logs or recordings', disabled: lock, onblur: (e) => { if (e.target.value !== (c.execution?.evidence ?? '')) actions.record(c.id, { evidence: e.target.value }); } });
   evidence.value = fieldValue(state.saveState, c.execution, 'evidence');
   const duration = el('input', { 'data-focus-key': 'duration', type: 'number', min: '0', placeholder: 'seconds', value: c.execution?.durationSec ?? '', disabled: lock, onblur: (e) => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= 0 && v !== c.execution?.durationSec) actions.record(c.id, { durationSec: v }); } });
   const envBox = pickList([...state.config.environments, 'any'], env, locked, (v) => actions.record(c.id, { env: v }), 'env');
@@ -207,7 +208,7 @@ function defectPanel(c, state, actions) {
   const rows = [
     el('h4', { text: `Defect ${defect.id}` }),
     el('div', { class: 'kv' }, [el('span', { text: 'Issue' }), issueLink, el('span', { text: 'Issue state' }), el('span', { text: defect.issue?.state ?? 'unknown' }), el('span', { text: 'Dispatch' }), el('span', { text: d ? d.state : 'not started' })]),
-    d?.pr ? el('p', {}, [el('a', { href: d.pr, target: '_blank', text: d.pr })]) : null,
+    d?.pr ? el('p', {}, [el('a', { href: d.pr, target: '_blank', class: 'external-link' }, [el('span', { text: d.pr }), icon('external')])]) : null,
     d?.error ? el('p', { class: 'toast error', text: d.error }) : null,
     modelSelect ? el('label', { class: 'inline', text: 'Model' }, [modelSelect]) : null,
     el('div', { class: 'actions' }, [
@@ -225,7 +226,7 @@ export function renderRuns(root, state, actions) {
   if (!state.config) { root.append(el('p', { class: 'empty', text: 'Loading' })); return; }
   const left = el('aside', { class: 'pane', 'data-pane': 'filters' }, [el('h2', { text: 'Runs' }), runList(state, actions), newRunForm(state, actions)]);
   if (!state.run) {
-    root.append(left, el('section', { class: 'pane', 'data-pane': 'list' }, [el('p', { class: 'empty', text: 'Pick a run or create one' })]), el('section', { class: 'pane', 'data-pane': 'detail' }, [renderProgress(state)]));
+    root.append(left, el('section', { class: 'pane', 'data-pane': 'list' }, [el('div', { class: 'pane-head' }, [filtersToggleButton()]), el('p', { class: 'empty', text: 'Pick a run or create one' })]), el('section', { class: 'pane', 'data-pane': 'detail' }, [renderProgress(state)]));
     return;
   }
   const inRunAll = inRunCases(state.cases, state.run);
@@ -237,6 +238,6 @@ export function renderRuns(root, state, actions) {
     : [renderProgress(state), ...(state.config.roles.length ? [el('h2', { text: 'By role' }), renderProgress(state, 'role')] : []), el('p', { class: 'empty', text: 'Select a case. Keys: j/k move, p f b s r record.' })];
   const summary = headerSummary(countStatuses(inRunAll), state.run.summary);
   const controls = el('div', { class: 'pane-head' }, [statusFilter(state, actions), closeControl(state, actions)]);
-  const head = el('div', {}, [el('div', { class: 'pane-head' }, [el('h2', { text: `${state.run.name} (${inRun.length})` }), el('span', { class: 'badge', text: summaryLabel(summary) })]), statusStrip(summary), controls]);
+  const head = el('div', {}, [el('div', { class: 'pane-head' }, [el('h2', { text: `${state.run.name} (${inRun.length})` }), el('span', { class: 'badge', text: summaryLabel(summary) }), filtersToggleButton()]), statusStrip(summary), controls]);
   root.append(left, el('section', { class: 'pane', 'data-pane': 'list' }, [head, renderList(state, actions, inRun, inRunAll.length)]), el('section', { class: 'pane', 'data-pane': 'detail' }, right));
 }
