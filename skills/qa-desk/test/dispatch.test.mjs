@@ -284,6 +284,27 @@ test('recoverOnStart re-enqueues a stranded queued defect, oldest first, and sta
   await settled(s.dispatcher);
 });
 
+test('a model outside the allowlist is refused and nothing is spawned', async () => {
+  const config = { ...TEST_CONFIG, agent: ['claude', '--model', '{model}', 'Fix {issueId}'], agentModels: ['sonnet'] };
+  const s = await setup({ config });
+  await assert.rejects(() => s.dispatcher.enqueue('D-0001', { model: 'evil; rm -rf /' }), /model/);
+  assert.equal(s.children.length, 0);
+  assert.equal(s.dispatcher.current(), null);
+});
+
+test('a model in the allowlist is substituted into the argv', async () => {
+  const config = { ...TEST_CONFIG, agent: ['claude', '--model', '{model}', 'Fix {issueId}'], agentModels: ['sonnet', 'opus'] };
+  const s = await setup({ config });
+  await s.dispatcher.enqueue('D-0001', { model: 'opus' });
+  assert.deepEqual(s.children[0].args, ['--model', 'opus', 'Fix 17']);
+});
+
+test('a supplied model is ignored when the agent argv has no {model} placeholder', async () => {
+  const s = await setup();
+  await s.dispatcher.enqueue('D-0001', { model: 'anything' });
+  assert.equal(s.children[0].args.includes('anything'), false);
+});
+
 test('enqueue refuses an issue id that is not a plain identifier', async () => {
   const s = await setup();
   const { patchDefect } = await import('../scripts/lib/defects.mjs');

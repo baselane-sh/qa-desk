@@ -61,6 +61,7 @@ test('GET /api/config and /api/cases', async (t) => {
   const s = await boot();
   t.after(() => s.close());
   assert.equal((await s.call('GET', '/api/config')).body.data.project, 'QA');
+  assert.equal((await s.call('GET', '/api/config')).body.data.agentModelsUsable, false);
   const r = await s.call('GET', '/api/cases');
   assert.equal(r.body.data.length, 2);
   assert.equal(r.body.data[0].execution, undefined);
@@ -180,6 +181,35 @@ test('dispatch refusals map to 409 through the real dispatcher, and the log is s
   assert.match(log.type, /text\/plain/); assert.equal(log.body, 'a\nb\nc\n');
   await patchDispatch(s.paths, 'D-0001', { log: '/etc/passwd' });
   assert.equal((await s.call('GET', '/api/defects/D-0001/log')).status, 400);
+});
+
+test('the dispatch route reads a model from the body and passes it to the dispatcher', async (t) => {
+  const calls = [];
+  const s = await boot({ dispatcher: { enqueue: async (id, opts) => { calls.push([id, opts]); return { state: 'running' }; }, current: () => null } });
+  t.after(() => s.close());
+  await createDefect(s.paths, { runId: 'R-0001', caseId: 'QA-0001', tracker: 'github', issueId: '17', url: 'u' });
+  const r = await s.call('POST', '/api/defects/D-0001/dispatch', { model: 'sonnet' });
+  assert.equal(r.status, 200);
+  assert.deepEqual(calls[0], ['D-0001', { model: 'sonnet' }]);
+});
+
+test('dispatching a model outside the allowlist is refused with 400, through the real dispatcher, and nothing is spawned', async (t) => {
+  const { spawn, children } = fakeSpawn();
+  const execFile = async () => ({ stdout: '[]', stderr: '' });
+  const config = { ...TEST_CONFIG, agent: ['claude', '--model', '{model}', 'Fix {issueId}'], agentModels: ['sonnet'] };
+  const s = await boot({
+    dispatcherFactory: ({ paths, root }) => createDispatcher({
+      spawn, execFile, paths, repoRoot: root, config,
+      tracker: { readCommand: () => ['gh'], noteCommand: () => ['gh'] },
+      promptTemplate: 'fix {issueId}', now: () => '2026-09-12T12:00:00.000Z',
+    }),
+  });
+  t.after(() => s.close());
+  await createDefect(s.paths, { runId: 'R-0001', caseId: 'QA-0001', tracker: 'github', issueId: '17', url: 'u' });
+  const r = await s.call('POST', '/api/defects/D-0001/dispatch', { model: 'evil; rm -rf /' });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /model/);
+  assert.equal(children.length, 0);
 });
 
 test('checkRequest refuses foreign origins, hosts and non-JSON writes', () => {

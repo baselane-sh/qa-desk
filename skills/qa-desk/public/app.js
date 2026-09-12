@@ -9,7 +9,7 @@ import { connectionLabel, OFFLINE_HELP } from './status.js';
 const VIEWS = { cases: renderCases, runs: renderRuns };
 const IDLE_SAVE_STATE = { actual: { status: 'idle', at: null, draft: null }, evidence: { status: 'idle', at: null, draft: null } };
 
-let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], historyLoaded: false, defect: null, log: '', bootError: null, showClosed: false, confirmClose: null, help: false, scrollToSelected: false, online: true, saveState: IDLE_SAVE_STATE };
+let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], historyLoaded: false, defect: null, log: '', logVisible: false, bootError: null, showClosed: false, confirmClose: null, help: false, scrollToSelected: false, online: true, saveState: IDLE_SAVE_STATE };
 const root = document.getElementById('root');
 const overlayRoot = document.getElementById('overlay-root');
 const toastEl = document.getElementById('toast');
@@ -57,12 +57,14 @@ async function loadCases() {
 // that resolves after a newer one cannot overwrite the newer answer.
 async function selectCase(id) {
   const token = ++selectCase.token;
-  setState({ selectedId: id, history: [], historyLoaded: false, defect: null, log: '', scrollToSelected: true, saveState: IDLE_SAVE_STATE });
+  clearPoll();
+  setState({ selectedId: id, history: [], historyLoaded: false, defect: null, log: '', logVisible: false, scrollToSelected: true, saveState: IDLE_SAVE_STATE });
   if (!id) return;
   const history = await api.get(`/api/cases/${encodeURIComponent(id)}/history`);
   const defect = state.run ? await findDefect(state.run.id, id) : null;
   if (token !== selectCase.token) return;
   setState({ history, historyLoaded: true, defect });
+  schedulePoll(defect?.id, defect?.dispatch?.state);
 }
 selectCase.token = 0;
 
@@ -75,8 +77,9 @@ async function findDefect(runId, caseId) {
 async function selectRun(run) {
   runBadge.textContent = run ? `${run.name} on ${run.build} (${run.env})` : 'No run selected';
   runBadge.classList.toggle('muted', !run);
+  clearPoll();
   const runs = await api.get('/api/runs');
-  setState({ runs, run, selectedId: null, defect: null, log: '', confirmClose: null });
+  setState({ runs, run, selectedId: null, defect: null, log: '', logVisible: false, confirmClose: null });
   await loadCases();
 }
 
@@ -159,17 +162,39 @@ async function openDefect(caseId) {
   toast(`Opened ${defect.id}`);
 }
 
-async function dispatch(defectId) {
-  await api.post(`/api/defects/${encodeURIComponent(defectId)}/dispatch`);
+// A dispatch that is still running is polled every 5 seconds so its state, and the log if the
+// tester has it open, keep moving on screen without a manual Refresh; the poll stops itself
+// the moment the dispatch is no longer running, and any earlier timer is always cleared first
+// so a fast sequence of dispatches or case switches never leaves two polls ticking at once.
+let pollTimer = null;
+function clearPoll() { clearTimeout(pollTimer); pollTimer = null; }
+function schedulePoll(defectId, dispatchState) {
+  clearPoll();
+  if (!defectId || dispatchState !== 'running') return;
+  pollTimer = setTimeout(() => guarded(() => refreshDefect(defectId)), 5000);
+}
+
+async function dispatch(defectId, model) {
+  await api.post(`/api/defects/${encodeURIComponent(defectId)}/dispatch`, model ? { model } : {});
   toast('Agent dispatched');
   await refreshDefect(defectId);
 }
 
 async function refreshDefect(defectId) {
   const defect = await api.get(`/api/defects/${encodeURIComponent(defectId)}`);
-  let log = '';
-  if (defect.dispatch?.log) { try { log = await api.text(`/api/defects/${encodeURIComponent(defectId)}/log`); } catch { log = ''; } }
+  let log = state.log;
+  if (state.logVisible) {
+    try { log = defect.dispatch?.log ? await api.text(`/api/defects/${encodeURIComponent(defectId)}/log`) : ''; } catch { log = ''; }
+  }
   setState({ defect, log });
+  schedulePoll(defectId, defect.dispatch?.state);
+}
+
+async function toggleLog(defectId) {
+  if (state.logVisible) { setState({ logVisible: false, log: '' }); return; }
+  let log = '';
+  try { log = await api.text(`/api/defects/${encodeURIComponent(defectId)}/log`); } catch { log = ''; }
+  setState({ logVisible: true, log });
 }
 
 async function createRun(input) {
@@ -218,8 +243,9 @@ const actions = {
   record: (caseId, patch) => guarded(() => record(caseId, patch)),
   undo: () => guarded(() => undo(state.selectedId)),
   openDefect: (caseId) => guarded(() => openDefect(caseId)),
-  dispatch: (defectId) => guarded(() => dispatch(defectId)),
+  dispatch: (defectId, model) => guarded(() => dispatch(defectId, model)),
   refreshDefect: (defectId) => guarded(() => refreshDefect(defectId)),
+  toggleLog: (defectId) => guarded(() => toggleLog(defectId)),
   createRun: (input) => guarded(() => createRun(input)),
   selectRun: (run) => guarded(() => selectRun(run)),
   askCloseRun: (runId) => setState({ confirmClose: runId }),

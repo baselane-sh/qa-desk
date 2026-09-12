@@ -22,7 +22,13 @@ export const AGENT_DEFAULTS = Object.freeze({
 });
 
 export const TRACKERS = Object.freeze(['github', 'beads']);
-export const PLACEHOLDERS = Object.freeze(['issueId', 'promptFile', 'repoRoot']);
+export const PLACEHOLDERS = Object.freeze(['issueId', 'promptFile', 'repoRoot', 'model']);
+
+/** Whether the configured agent argv carries the `{model}` placeholder at all: the model
+ * picker in the UI, and the model allowlist check at dispatch time, both key off this. */
+export function agentHasModelToken(agent) {
+  return agent.some((element) => /\{model\}/.test(element));
+}
 const PROJECT_RE = /^[A-Z][A-Z0-9]{0,11}$/;
 const LIST_FIELDS = ['types', 'priorities', 'severities', 'environments', 'locales'];
 
@@ -42,7 +48,7 @@ function validateAgentPlaceholders(agent, problems) {
 
 /** Deep enough that config.types.push(...) or config.components[0].sources.push(...) throws, not just reassigning config.types itself. */
 function freezeConfig(config) {
-  for (const key of [...LIST_FIELDS, 'roles', 'gates', 'agent', 'agentEnvStrip']) Object.freeze(config[key]);
+  for (const key of [...LIST_FIELDS, 'roles', 'gates', 'agent', 'agentEnvStrip', 'agentModels']) Object.freeze(config[key]);
   for (const component of config.components) { Object.freeze(component.sources); Object.freeze(component); }
   Object.freeze(config.components);
   return Object.freeze(config);
@@ -83,6 +89,9 @@ export function validateConfig(raw) {
   if (!isStringArray(agent) || agent.length === 0) problems.push('agent must be an array of strings (argv), never a shell string');
   config.agent = isStringArray(agent) ? [...agent] : [...AGENT_DEFAULTS.claude];
   if (isStringArray(agent)) validateAgentPlaceholders(config.agent, problems);
+  const agentModels = raw.agentModels ?? [];
+  if (!isStringArray(agentModels)) problems.push('agentModels must be an array of strings');
+  config.agentModels = isStringArray(agentModels) ? [...agentModels] : [];
   const strip = raw.agentEnvStrip ?? DEFAULTS.agentEnvStrip;
   if (!isStringArray(strip)) problems.push('agentEnvStrip must be an array of strings');
   config.agentEnvStrip = isStringArray(strip) ? [...strip] : [...DEFAULTS.agentEnvStrip];

@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
-import { substituteArgv } from './config.mjs';
+import { substituteArgv, agentHasModelToken } from './config.mjs';
 import { getDefect, listDefects, patchDispatch } from './defects.mjs';
 import { renderFixPrompt } from './prompt.mjs';
 
@@ -35,8 +35,8 @@ export function createDispatcher({ spawn, execFile, paths, repoRoot, config, tra
     if (next === undefined) return;
     // Claimed synchronously, in the same tick as the shift, so a call to enqueue that
     // interleaves with this one sees running already set and queues instead of spawning.
-    running = next;
-    start(next).catch((err) => console.error(`qa-desk: could not start the next queued dispatch ${next}: ${err.message}`));
+    running = next.id;
+    start(next.id, next.model).catch((err) => console.error(`qa-desk: could not start the next queued dispatch ${next.id}: ${err.message}`));
   }
 
   /**
@@ -56,12 +56,21 @@ export function createDispatcher({ spawn, execFile, paths, repoRoot, config, tra
     startNextPending();
   }
 
-  async function prepare(defect) {
+  async function prepare(defect, model) {
     const { issueId } = defect;
     await mkdir(paths.logs, { recursive: true });
     const promptFile = join(paths.logs, `${issueId}.prompt.md`);
     await writeFile(promptFile, renderFixPrompt({ template: promptTemplate, issueId, config, tracker, repoRoot }), 'utf8');
-    const argv = substituteArgv(config.agent, { issueId, promptFile, repoRoot });
+    const vars = { issueId, promptFile, repoRoot };
+    // A model never reaches the argv unless the configured template asks for one; a model
+    // supplied when it does not is silently ignored (the ruling from planning). When the
+    // template does ask for one, it must be a member of the allowlist checked here, on the
+    // server, never trusting the browser to have already filtered it.
+    if (agentHasModelToken(config.agent)) {
+      if (!config.agentModels.includes(model)) throw new Error(`model "${model}" is not in the configured agentModels allowlist`);
+      vars.model = model;
+    }
+    const argv = substituteArgv(config.agent, vars);
     return { argv, log: join(paths.logs, `${issueId}.log`), branch: `${config.branchPrefix}${issueId}` };
   }
 
@@ -112,14 +121,14 @@ export function createDispatcher({ spawn, execFile, paths, repoRoot, config, tra
    * that claim and the caller's own synchronous check, where a second
    * enqueue racing in the same tick could see `running` still null.
    */
-  async function start(defectId) {
+  async function start(defectId, model) {
     let child;
     let stream;
     let prepared;
     try {
       const defect = await getDefect(paths, defectId);
       assertDispatchable(defect, defectId);
-      prepared = await prepare(defect);
+      prepared = await prepare(defect, model);
       stream = createWriteStream(prepared.log, { flags: 'a' });
       stream.on('error', (err) => console.error(`qa-desk: could not write the dispatch log for ${defectId}: ${err.message}`));
       const [cmd, ...args] = prepared.argv;
@@ -148,25 +157,25 @@ export function createDispatcher({ spawn, execFile, paths, repoRoot, config, tra
    * enqueues of different defects both reading `running` as null and both
    * spawning.
    */
-  async function enqueue(defectId) {
-    if (running === defectId || pending.includes(defectId)) {
+  async function enqueue(defectId, { model } = {}) {
+    if (running === defectId || pending.some((p) => p.id === defectId)) {
       throw new Error(`dispatch already running for ${defectId}`);
     }
     if (running !== null) {
-      pending.push(defectId);
+      pending.push({ id: defectId, model });
       try {
         const defect = await getDefect(paths, defectId);
         assertDispatchable(defect, defectId);
         await patchDispatch(paths, defectId, { state: 'queued', error: null });
         return { state: 'queued' };
       } catch (err) {
-        const idx = pending.indexOf(defectId);
+        const idx = pending.findIndex((p) => p.id === defectId);
         if (idx !== -1) pending.splice(idx, 1);
         throw err;
       }
     }
     running = defectId;
-    return start(defectId);
+    return start(defectId, model);
   }
 
   function adoptOrphan(defectId, pid, branch) {
@@ -196,7 +205,10 @@ export function createDispatcher({ spawn, execFile, paths, repoRoot, config, tra
     // only, and the UI disables Dispatch for anything but failed/pr-open, so nothing on disk
     // or on screen can recover it without this. `listDefects` preserves creation order, which
     // doubles as enqueue order for defects that were never re-ordered, so this is oldest first.
-    const queued = all.filter((d) => d.dispatch?.state === 'queued').map((d) => d.id);
+    // A restart loses the in-memory queue, model included: a defect recovered here re-starts
+    // with no model, which `prepare` then refuses if the template needs one. That is an
+    // acceptable, rare edge of a best-effort recovery path, not a silent wrong dispatch.
+    const queued = all.filter((d) => d.dispatch?.state === 'queued').map((d) => ({ id: d.id, model: undefined }));
     pending.push(...queued);
     if (running === null) startNextPending();
     return dead;

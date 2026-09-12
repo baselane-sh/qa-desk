@@ -66,7 +66,8 @@ different setup than the rest of the run.
 | `environments[]` | local, staging, prod | |
 | `locales[]` | en | |
 | `tracker` | github | or `beads` |
-| `agent[]` | claude argv | argv template with `{issueId}`, `{promptFile}`, `{repoRoot}` |
+| `agent[]` | claude argv | argv template with `{issueId}`, `{promptFile}`, `{repoRoot}`, and optionally `{model}` |
+| `agentModels[]` | `[]` | model allowlist; the dashboard's model picker only appears when this is non-empty **and** `agent[]` contains `{model}` |
 | `agentEnvStrip[]` | CLAUDECODE, CLAUDE_PID, CLAUDE_CODE_* | env removed before spawn |
 | `gates[]` | `[]` | commands the fix agent must run green |
 | `branchPrefix` | `qa/` | fix branch is `qa/<issueId>` |
@@ -74,6 +75,20 @@ different setup than the rest of the run.
 
 The `codex` argv default (`--agent codex`) has not been verified against a
 real `codex --help`. Check it yourself before the first dispatch.
+
+A model token is opt in. The default `agent[]` carries no `{model}` placeholder, so an
+existing config's command never changes underneath it. To let testers pick a model per
+dispatch, add both `{model}` to `agent[]` and the models it may take to `agentModels[]`:
+
+```json
+{
+  "agent": ["claude", "-p", "--model", "{model}", "--append-system-prompt-file", "{promptFile}", "Fix issue {issueId}"],
+  "agentModels": ["sonnet", "opus"]
+}
+```
+
+The model never reaches a shell: it substitutes into one argv element, and the server
+refuses any value that is not in `agentModels[]` before spawning anything.
 
 ## Security model
 

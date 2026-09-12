@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULTS, AGENT_DEFAULTS, validateConfig, loadConfig, substituteArgv, ConfigError } from '../scripts/lib/config.mjs';
+import { DEFAULTS, AGENT_DEFAULTS, PLACEHOLDERS, validateConfig, loadConfig, substituteArgv, agentHasModelToken, ConfigError } from '../scripts/lib/config.mjs';
 import { dataPaths } from '../scripts/lib/paths.mjs';
 
 const minimal = () => ({ project: 'QA', components: [{ name: 'auth', sources: ['a.ts'] }] });
@@ -19,6 +19,24 @@ test('validateConfig fills defaults', () => {
   assert.deepEqual(r.config.agent, AGENT_DEFAULTS.claude);
   assert.deepEqual(r.config.agentEnvStrip, ['CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_CODE_*']);
   assert.deepEqual(r.config.components[0], { name: 'auth', sources: ['a.ts'], notes: '' });
+  assert.deepEqual(r.config.agentModels, []);
+});
+
+test('agentModels is an allowlist and {model} is a known placeholder', async () => {
+  const base = { project: 'QA', components: [{ name: 'auth', sources: ['a.ts'] }] };
+  assert.deepEqual(PLACEHOLDERS, ['issueId', 'promptFile', 'repoRoot', 'model']);
+  const ok = validateConfig({ ...base, agent: ['claude', '--model', '{model}', 'go'], agentModels: ['sonnet', 'opus'] });
+  assert.equal(ok.ok, true, JSON.stringify(ok.problems));
+  assert.deepEqual(ok.config.agentModels, ['sonnet', 'opus']);
+  const bad = validateConfig({ ...base, agentModels: 'sonnet' });
+  assert.equal(bad.ok, false);
+  const unknown = validateConfig({ ...base, agent: ['claude', '{nonsense}'] });
+  assert.equal(unknown.ok, false, 'an unknown placeholder must be refused at config time');
+});
+
+test('agentHasModelToken reports whether an argv carries the {model} placeholder', () => {
+  assert.equal(agentHasModelToken(['claude', '--model', '{model}']), true);
+  assert.equal(agentHasModelToken(AGENT_DEFAULTS.claude), false);
 });
 
 test('validateConfig reports every problem at once', () => {
@@ -60,6 +78,7 @@ test('validateConfig deep freezes config so its arrays cannot be mutated after t
   assert.throws(() => r.config.agent.push('x'));
   assert.throws(() => r.config.components[0].sources.push('x'));
   assert.throws(() => { r.config.components[0].name = 'y'; });
+  assert.throws(() => r.config.agentModels.push('x'));
 });
 
 test('substituteArgv replaces placeholders inside each element and never joins', () => {

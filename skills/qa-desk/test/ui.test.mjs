@@ -376,6 +376,57 @@ test('fieldValue reads the unsaved draft while a save has failed, otherwise the 
   assert.equal(fieldValue(null, null, 'actual'), '');
 });
 
+test('tallyLabel counts what is on screen and what is marked', async () => {
+  const { tallyLabel } = await import('../public/status.js');
+  assert.equal(tallyLabel({ visible: 600, total: 600, counts: { passed: 0, failed: 0 } }), '600 cases');
+  assert.equal(tallyLabel({ visible: 12, total: 600, counts: { passed: 3, failed: 1 } }), '12 of 600 cases · 4 marked · 3 passed · 1 failed');
+  assert.equal(tallyLabel({ visible: 0, total: 0, counts: {} }), '0 cases');
+});
+
+test('progressBarLabel spells the breakdown out in words, in order, and omits zero counts', async () => {
+  const { progressBarLabel } = await import('../public/views/cases.js');
+  assert.equal(progressBarLabel('auth', { passed: 4, failed: 1, blocked: 0, skipped: 0, retest: 0 }, 12), 'auth: 4 passed, 1 failed, 7 untested of 12');
+  assert.equal(progressBarLabel('billing', { passed: 0, failed: 0, blocked: 0, skipped: 0, retest: 0 }, 5), 'billing: 5 untested of 5');
+  assert.equal(progressBarLabel('auth', { passed: 3, failed: 0, blocked: 0, skipped: 0, retest: 0 }, 3), 'auth: 3 passed of 3');
+});
+
+test('dispatchButtonLabel names Agent running, Dispatch again after a failure, and the plain label otherwise', async () => {
+  const { dispatchButtonLabel } = await import('../public/views/runs.js');
+  assert.equal(dispatchButtonLabel(undefined), 'Dispatch fix agent');
+  assert.equal(dispatchButtonLabel({ state: 'running' }), 'Agent running');
+  assert.equal(dispatchButtonLabel({ state: 'failed' }), 'Dispatch again');
+  assert.equal(dispatchButtonLabel({ state: 'pr-open' }), 'Dispatch fix agent');
+  assert.equal(dispatchButtonLabel({ state: 'queued' }), 'Dispatch fix agent');
+});
+
+test('showModelPicker appears only once the server reports the argv accepts a model and the allowlist is non-empty', async () => {
+  const { showModelPicker } = await import('../public/views/runs.js');
+  assert.equal(showModelPicker({ agentModels: [], agentModelsUsable: true }), false);
+  assert.equal(showModelPicker({ agentModels: ['sonnet'], agentModelsUsable: false }), false);
+  assert.equal(showModelPicker({ agentModels: ['sonnet'], agentModelsUsable: true }), true);
+  assert.equal(showModelPicker({}), false);
+});
+
+test('the defect panel wires the model select, the dispatch label and the log toggle through the pure helpers, never straight to state', async () => {
+  const text = await read('views/runs.js');
+  assert.match(text, /showModelPicker\(state\.config\)/, 'the model select must be gated by showModelPicker');
+  assert.match(text, /dispatchButtonLabel\(d\)/, 'the dispatch button label must come from dispatchButtonLabel');
+  assert.match(text, /actions\.dispatch\(defect\.id, modelSelect\?\.value\)/, 'dispatch must carry the picked model');
+  assert.match(text, /actions\.toggleLog\(defect\.id\)/, 'the log button must call toggleLog, not fetch the log itself');
+  assert.match(text, /state\.logVisible \? 'Hide log' : 'Show log'/);
+});
+
+test('a running dispatch is polled every 5000ms, and the poll is cleared before every case or run switch', async () => {
+  const text = await read('app.js');
+  assert.match(text, /function schedulePoll\(defectId, dispatchState\) \{/);
+  assert.match(text, /dispatchState !== 'running'/, 'the poll must stop once the dispatch is no longer running');
+  assert.match(text, /setTimeout\(\(\) => guarded\(\(\) => refreshDefect\(defectId\)\), 5000\)/);
+  const selectCaseBody = text.slice(text.indexOf('async function selectCase('), text.indexOf('selectCase.token = 0;'));
+  assert.match(selectCaseBody, /clearPoll\(\);/, 'switching cases must clear any earlier poll');
+  const selectRunBody = text.slice(text.indexOf('async function selectRun('), text.indexOf('let recordToken'));
+  assert.match(selectRunBody, /clearPoll\(\);/, 'switching runs must clear any earlier poll');
+});
+
 test('a failed fetch reports offline; any answer reports online again', async () => {
   const { api, onConnection } = await import('../public/api.js');
   const seen = [];

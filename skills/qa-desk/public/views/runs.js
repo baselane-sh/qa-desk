@@ -62,6 +62,22 @@ export function defectHint(status) {
   return DEFECT_STATUSES.includes(status) ? null : 'Needs a failed or blocked execution';
 }
 
+// Once a dispatch has failed, the button says so, rather than repeating the same first-time
+// label as if nothing had been tried yet.
+export function dispatchButtonLabel(dispatch) {
+  if (dispatch?.state === 'running') return 'Agent running';
+  if (dispatch?.state === 'failed') return 'Dispatch again';
+  return 'Dispatch fix agent';
+}
+
+// The model picker is an opt in: it appears only once the configured agent argv actually
+// carries a `{model}` token (config.agentModelsUsable, computed server-side) and the
+// allowlist behind it is non-empty. A config with an allowlist but no `{model}` token, or a
+// `{model}` token but an empty allowlist, shows no picker either way.
+export function showModelPicker(config) {
+  return Boolean(config?.agentModelsUsable && config?.agentModels?.length);
+}
+
 function newRunForm(state, actions) {
   const { config } = state;
   const name = el('input', { 'data-focus-key': 'run-name', placeholder: 'Sprint 12 regression' });
@@ -187,16 +203,19 @@ function defectPanel(c, state, actions) {
   const d = defect.dispatch;
   const issueLink = defect.url ? el('a', { href: defect.url, target: '_blank', text: `${defect.tracker} #${defect.issueId}` }) : el('span', { text: `${defect.tracker} ${defect.issueId}` });
   const canDispatch = !d || ['failed', 'pr-open'].includes(d.state);
+  const modelSelect = showModelPicker(state.config) ? el('select', { 'data-focus-key': 'dispatch-model' }, state.config.agentModels.map((m) => el('option', { value: m, text: m }))) : null;
   const rows = [
     el('h4', { text: `Defect ${defect.id}` }),
     el('div', { class: 'kv' }, [el('span', { text: 'Issue' }), issueLink, el('span', { text: 'Issue state' }), el('span', { text: defect.issue?.state ?? 'unknown' }), el('span', { text: 'Dispatch' }), el('span', { text: d ? d.state : 'not started' })]),
     d?.pr ? el('p', {}, [el('a', { href: d.pr, target: '_blank', text: d.pr })]) : null,
     d?.error ? el('p', { class: 'toast error', text: d.error }) : null,
+    modelSelect ? el('label', { class: 'inline', text: 'Model' }, [modelSelect]) : null,
     el('div', { class: 'actions' }, [
-      el('button', { class: 'primary', text: d?.state === 'running' ? 'Agent running' : 'Dispatch fix agent', disabled: canDispatch ? null : 'disabled', onclick: () => actions.dispatch(defect.id) }),
+      el('button', { class: 'primary', text: dispatchButtonLabel(d), disabled: canDispatch ? null : 'disabled', onclick: () => actions.dispatch(defect.id, modelSelect?.value) }),
       el('button', { text: 'Refresh', onclick: () => actions.refreshDefect(defect.id) }),
+      d?.log ? el('button', { text: state.logVisible ? 'Hide log' : 'Show log', onclick: () => actions.toggleLog(defect.id) }) : null,
     ]),
-    state.log ? el('pre', { class: 'log', text: state.log }) : null,
+    state.logVisible && state.log ? el('pre', { class: 'log', text: state.log }) : null,
   ];
   return el('div', {}, rows);
 }

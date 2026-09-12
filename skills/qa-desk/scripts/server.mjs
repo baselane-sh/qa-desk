@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { join, resolve, sep, extname, normalize } from 'node:path';
 import { execFileWithInput } from './lib/exec.mjs';
-import { loadConfig } from './lib/config.mjs';
+import { loadConfig, agentHasModelToken } from './lib/config.mjs';
 import { dataPaths } from './lib/paths.mjs';
 import { readJson } from './lib/store.mjs';
 import { validateExecutionPatch, validateRunInput } from './lib/validate.mjs';
@@ -205,11 +205,13 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
     return { ...d, issue: value };
   }
 
-  async function dispatchRoute(id) {
+  async function dispatchRoute(req, id) {
     await loadDefect(id);
-    try { return await dispatcher.enqueue(id); } catch (err) {
+    const { model } = await readBody(req);
+    try { return await dispatcher.enqueue(id, { model }); } catch (err) {
       if (/already running/.test(err.message)) throw new HttpError(409, err.message);
       if (/not a plain identifier/.test(err.message)) throw new HttpError(400, err.message);
+      if (/model/.test(err.message)) throw new HttpError(400, err.message);
       throw err;
     }
   }
@@ -226,7 +228,7 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
   }
 
   const routes = [
-    ['GET', /^\/api\/config$/, async () => config],
+    ['GET', /^\/api\/config$/, async () => ({ ...config, agentModelsUsable: agentHasModelToken(config.agent) })],
     ['GET', /^\/api\/cases$/, async (req, [], url) => casesRoute(url)],
     ['GET', /^\/api\/cases\/([\w-]+)\/history$/, async (req, [id]) => historyRoute(id)],
     ['GET', /^\/api\/runs$/, async () => listRunsRoute()],
@@ -236,7 +238,7 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
     ['PUT', /^\/api\/runs\/([\w-]+)\/executions\/([\w-]+)$/, async (req, [runId, caseId]) => executionRoute(req, runId, caseId)],
     ['POST', /^\/api\/defects$/, async (req) => createDefectRoute(req)],
     ['GET', /^\/api\/defects\/([\w-]+)$/, async (req, [id]) => showDefectRoute(id)],
-    ['POST', /^\/api\/defects\/([\w-]+)\/dispatch$/, async (req, [id]) => dispatchRoute(id)],
+    ['POST', /^\/api\/defects\/([\w-]+)\/dispatch$/, async (req, [id]) => dispatchRoute(req, id)],
     ['GET', /^\/api\/defects\/([\w-]+)\/log$/, async (req, [id]) => logRoute(id)],
     ['GET', /^\/api\/coverage$/, async () => readJson(paths.coverage, { uncovered: [], counts: {}, byComponent: {} })],
     ['GET', /^\/(?!api\/).*/, async (req, [], url) => serveStatic(publicDir, url.pathname)],

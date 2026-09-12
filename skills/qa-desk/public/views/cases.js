@@ -1,4 +1,5 @@
 import { isDefaultFilters } from '../filters-store.js';
+import { tallyLabel } from '../status.js';
 
 const STATUSES = ['passed', 'failed', 'blocked', 'skipped', 'retest'];
 
@@ -89,18 +90,42 @@ export function renderFilters(state, actions) {
   return el('div', { class: 'filters' }, [el('label', { text: 'Search' }, [q]), ...selects]);
 }
 
+// The words behind each bar's aria-label, e.g. "auth: 4 passed, 1 failed, 7 untested of 12".
+// A pure function so it can be checked directly, without a DOM, unlike the bar itself.
+export function progressBarLabel(name, counts, total) {
+  const parts = STATUSES.filter((s) => counts[s] > 0).map((s) => `${counts[s]} ${s}`);
+  const untested = total - STATUSES.reduce((sum, s) => sum + (counts[s] ?? 0), 0);
+  if (untested > 0) parts.push(`${untested} untested`);
+  return `${name}: ${parts.join(', ')} of ${total}`;
+}
+
+// With a run selected, the denominator is exactly that run's frozen caseIds, unfiltered: this
+// keeps the run version of this bar exactly as it always was. With no run (the Cases view's
+// default, or the Runs view before one is picked), there is no per-run status to show, so this
+// groups the cases visible under the current filters instead, and every bar reads as untested.
 export function renderProgress(state, groupKey = 'component') {
-  if (!state.run) return el('div', { class: 'progress' }, [el('p', { class: 'empty', text: 'Pick a run to see progress' })]);
+  const { run, cases, filters } = state;
   const groups = groupKey === 'role' ? state.config.roles : state.config.components.map((c) => c.name);
-  const inRun = state.cases.filter((c) => state.run.caseIds.includes(c.id));
+  const source = run ? cases.filter((c) => run.caseIds.includes(c.id)) : cases.filter((c) => !c.supersededBy && matchesFilters(c, filters));
   return el('div', { class: 'progress' }, groups.map((g) => {
-    const items = inRun.filter((c) => (groupKey === 'role' ? (c.actors ?? []).includes(g) : c.component === g));
+    const items = source.filter((c) => (groupKey === 'role' ? (c.actors ?? []).includes(g) : c.component === g));
     if (!items.length) return null;
     const counts = Object.fromEntries(STATUSES.map((s) => [s, items.filter((c) => statusOf(c) === s).length]));
-    const bar = el('div', { class: 'bar' }, STATUSES.map((s) => el('span', { class: s, style: `width:${(counts[s] / items.length) * 100}%` })));
+    const bar = el('div', { class: 'bar', role: 'img', 'aria-label': progressBarLabel(g, counts, items.length) }, STATUSES.map((s) => el('span', { class: s, style: `width:${(counts[s] / items.length) * 100}%` })));
     const done = items.length - items.filter((c) => statusOf(c) === 'untested').length;
     return el('div', { class: 'row' }, [el('span', { text: g, style: 'width:90px' }), bar, el('span', { text: `${done}/${items.length}` })]);
   }));
+}
+
+// How many of the visible cases carry each real verdict, canonically ordered and with the
+// zero entries dropped, ready to hand straight to tallyLabel's `counts`.
+export function tallyCounts(cases) {
+  const out = {};
+  for (const s of STATUSES) {
+    const n = cases.filter((c) => statusOf(c) === s).length;
+    if (n > 0) out[s] = n;
+  }
+  return out;
 }
 
 // Which empty state an empty list gets, decided away from the DOM so a test can hold it to
@@ -174,7 +199,7 @@ export function renderCases(root, state, actions) {
   ]);
   root.append(
     el('aside', { class: 'pane', 'data-pane': 'filters' }, [filtersHead, renderFilters(state, actions), el('h2', { text: 'Progress', style: 'margin-top:16px' }), renderProgress(state)]),
-    el('section', { class: 'pane', 'data-pane': 'list' }, [el('h2', { text: `Cases (${visible.length})` }), renderList(state, actions, visible, total)]),
+    el('section', { class: 'pane', 'data-pane': 'list' }, [el('h2', { text: tallyLabel({ visible: visible.length, total, counts: tallyCounts(visible) }) }), renderList(state, actions, visible, total)]),
     el('section', { class: 'pane', 'data-pane': 'detail' }, selected ? [renderCaseDetail(selected, state)] : [el('p', { class: 'empty', text: 'Select a case. Keys: j/k move, p f b s r record in the current run.' })]),
   );
 }
