@@ -16,6 +16,7 @@ test('parseArgs reads command, --repo and --agent', () => {
   assert.deepEqual(parseArgs(['init', '--repo', '/r', '--agent', 'codex']), { command: 'init', repo: '/r', agent: 'codex' });
   assert.deepEqual(parseArgs([]), { command: 'help', repo: null, agent: 'claude' });
   assert.throws(() => parseArgs(['init', '--bogus']), /unknown option --bogus/);
+  assert.throws(() => parseArgs(['init', '--repo']), /--repo requires a value/);
 });
 
 test('init writes a config and merge reports coverage', async () => {

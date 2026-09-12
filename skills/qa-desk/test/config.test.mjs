@@ -45,6 +45,23 @@ test('validateConfig rejects a non-object', () => {
   assert.equal(validateConfig([]).ok, false);
 });
 
+test('validateConfig rejects an agent template with an unknown placeholder', () => {
+  const r = validateConfig({ ...minimal(), agent: ['echo', '{repo}', '{issueId}'] });
+  assert.equal(r.ok, false);
+  assert.match(r.problems.join('\n'), /agent uses unknown placeholder\(s\): repo/);
+  assert.equal(validateConfig({ ...minimal(), agent: AGENT_DEFAULTS.claude }).ok, true);
+  assert.equal(validateConfig({ ...minimal(), agent: AGENT_DEFAULTS.codex }).ok, true);
+});
+
+test('validateConfig deep freezes config so its arrays cannot be mutated after the fact', () => {
+  const r = validateConfig(minimal());
+  assert.equal(r.ok, true);
+  assert.throws(() => r.config.types.push('x'));
+  assert.throws(() => r.config.agent.push('x'));
+  assert.throws(() => r.config.components[0].sources.push('x'));
+  assert.throws(() => { r.config.components[0].name = 'y'; });
+});
+
 test('substituteArgv replaces placeholders inside each element and never joins', () => {
   const out = substituteArgv(['claude', '--file', '{promptFile}', 'Fix {issueId} in {repoRoot}'], { promptFile: '/tmp/p.md', issueId: '42', repoRoot: '/r' });
   assert.deepEqual(out, ['claude', '--file', '/tmp/p.md', 'Fix 42 in /r']);

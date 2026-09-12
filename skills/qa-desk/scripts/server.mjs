@@ -143,7 +143,9 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
     return serialize(async () => {
       const existing = await findDefect(paths, runId, caseId);
       if (existing) throw new HttpError(409, `${caseId} in ${runId} already has defect ${existing.id}`);
-      const labels = ['qa-desk', c.component, c.priority, c.severity];
+      // Beads already carries priority as a dedicated field (see priorityToNumber below), so
+      // only GitHub Issues needs priority and severity spelled out as labels too.
+      const labels = tracker.name === 'beads' ? ['qa-desk', c.component] : ['qa-desk', c.component, c.priority, c.severity];
       const issue = await tracker.create({ title: buildDefectTitle(c, run), body: buildDefectBody({ case: c, run, execution, config }), labels, priority: priorityToNumber(c.priority, config) });
       return createDefect(paths, { runId, caseId, tracker: tracker.name, issueId: issue.id, url: issue.url });
     });
@@ -152,7 +154,10 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
   async function showDefectRoute(id) {
     const d = await loadDefect(id);
     const hit = showCache.get(d.issueId);
-    if (hit && Date.now() - hit.at < SHOW_CACHE_MS) return { ...d, issue: hit.value };
+    if (hit) {
+      if (Date.now() - hit.at < SHOW_CACHE_MS) return { ...d, issue: hit.value };
+      showCache.delete(d.issueId);
+    }
     const value = await tracker.show(d.issueId);
     showCache.set(d.issueId, { at: Date.now(), value });
     return { ...d, issue: value };

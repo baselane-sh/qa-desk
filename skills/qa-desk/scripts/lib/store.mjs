@@ -1,4 +1,4 @@
-import { readFile, writeFile, rename } from 'node:fs/promises';
+import { readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 
 export async function readJson(path, fallback) {
@@ -13,7 +13,13 @@ export async function readJson(path, fallback) {
 export async function writeJsonAtomic(path, value) {
   const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(tmp, JSON.stringify(value, null, 2) + '\n', 'utf8');
-  await rename(tmp, path);
+  try {
+    await rename(tmp, path);
+  } catch (err) {
+    // The gitignored .tmp file is otherwise left behind forever if the rename itself fails.
+    await unlink(tmp).catch(() => {});
+    throw err;
+  }
 }
 
 const queues = new Map();

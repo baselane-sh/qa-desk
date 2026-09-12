@@ -12,7 +12,12 @@ export async function readJsonl(path, { warn = defaultWarn } = {}) {
   const out = [];
   text.split('\n').forEach((line, i) => {
     if (!line.trim()) return;
-    try { out.push(JSON.parse(line)); } catch { warn(line, i + 1); }
+    let parsed;
+    try { parsed = JSON.parse(line); } catch { warn(line, i + 1); return; }
+    // Valid JSON that is not a plain record (null, a number, an array) would otherwise reach
+    // latestBy and throw reading .id off it. Treat it the same as a malformed line.
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { warn(line, i + 1); return; }
+    out.push(parsed);
   });
   return out;
 }

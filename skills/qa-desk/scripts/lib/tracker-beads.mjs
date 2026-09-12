@@ -26,7 +26,7 @@ export function createBeadsTracker({ execFile, repoRoot, backoffMs = DEFAULT_BAC
       try { return await runOnce(args); } catch (err) {
         lastErr = err;
         if (!isLockError(err)) throw describe(err);
-        await new Promise((r) => setTimeout(r, backoffMs * attempt));
+        if (attempt < LOCK_RETRIES) await new Promise((r) => setTimeout(r, backoffMs * attempt));
       }
     }
     throw describe(lastErr);

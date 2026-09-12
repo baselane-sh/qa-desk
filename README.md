@@ -42,6 +42,12 @@ Code stays in the skill. Data stays in your repo under `.qa-desk/`:
 | `coverage.json` | sources with zero cases |
 | `logs/` | agent logs, gitignored |
 
+Regenerating cases for a component updates an existing case when its title
+matches within that component; a case whose title changed is not detected as
+the same case. `supersededBy` is honoured wherever cases are read (coverage
+excludes a case that carries it) but nothing writes it automatically, so mark
+a case superseded by hand when a rewritten case should replace an old one.
+
 ## Config reference
 
 | Field | Default | Meaning |

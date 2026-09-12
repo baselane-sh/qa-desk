@@ -20,6 +20,16 @@ test('readJsonl skips malformed lines and reports them', async () => {
   assert.deepEqual(warned, [2]);
 });
 
+test('readJsonl skips a line that parses but is not a plain record', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'jsonl-'));
+  const p = join(dir, 'a.jsonl');
+  await writeFile(p, '{"id":1}\nnull\n42\n["x"]\n{"id":2}\n');
+  const warned = [];
+  const rows = await readJsonl(p, { warn: (line, i) => warned.push(i) });
+  assert.deepEqual(rows, [{ id: 1 }, { id: 2 }]);
+  assert.deepEqual(warned, [2, 3, 4]);
+});
+
 test('appendJsonl creates the directory and appends one line per record', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'jsonl-'));
   const p = join(dir, 'nested', 'b.jsonl');

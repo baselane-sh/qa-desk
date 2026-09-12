@@ -114,6 +114,16 @@ test('defects: needs a failed or blocked execution, creates once, shows with iss
   await s.close();
 });
 
+test('defects created against the beads tracker carry only qa-desk and component labels', async () => {
+  const created = [];
+  const s = await boot({ tracker: { name: 'beads', create: async (x) => { created.push(x); return { id: '9', url: null }; }, show: async () => ({ id: '9', url: null, state: 'open', notes: '' }) } });
+  await makeRun(s);
+  await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'failed', actual: 'boom' });
+  await s.call('POST', '/api/defects', { runId: 'R-0001', caseId: 'QA-0001' });
+  assert.deepEqual(created[0].labels, ['qa-desk', 'auth']);
+  await s.close();
+});
+
 test('dispatch refusals map to 409 and the log is served only from the log dir', async () => {
   const s = await boot({ dispatcher: { enqueue: async () => { throw new Error('dispatch already running for D-0001'); }, current: () => 'D-0001' } });
   await createDefect(s.paths, { runId: 'R-0001', caseId: 'QA-0001', tracker: 'github', issueId: '17', url: 'u' });

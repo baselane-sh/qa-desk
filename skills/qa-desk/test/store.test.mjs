@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readJson, writeJsonAtomic, mutateJson } from '../scripts/lib/store.mjs';
@@ -16,6 +16,14 @@ test('writeJsonAtomic leaves no temp file behind', async () => {
   await writeJsonAtomic(p, { a: 1 });
   assert.deepEqual(await readJson(p, null), { a: 1 });
   assert.deepEqual(await readdir(dir), ['x.json']);
+});
+
+test('writeJsonAtomic removes the temp file when rename fails', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'store-'));
+  const targetDir = join(dir, 'is-a-dir');
+  await mkdir(targetDir); // renaming a file onto an existing directory fails
+  await assert.rejects(writeJsonAtomic(targetDir, { a: 1 }));
+  assert.deepEqual(await readdir(dir), ['is-a-dir']);
 });
 
 test('mutateJson serialises concurrent read-modify-write on one path', async () => {

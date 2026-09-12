@@ -32,6 +32,22 @@ export class ConfigError extends Error {
 
 const isStringArray = (v) => Array.isArray(v) && v.every((s) => typeof s === 'string' && s.length > 0);
 
+function validateAgentPlaceholders(agent, problems) {
+  const unknown = new Set();
+  for (const element of agent) for (const m of element.matchAll(/\{(\w+)\}/g)) if (!PLACEHOLDERS.includes(m[1])) unknown.add(m[1]);
+  // Catching this here, instead of only at dispatch time, means a bad template fails init
+  // or a config edit immediately rather than after a whole QA pass has already run.
+  if (unknown.size) problems.push(`agent uses unknown placeholder(s): ${[...unknown].join(', ')} (must be one of ${PLACEHOLDERS.join(', ')})`);
+}
+
+/** Deep enough that config.types.push(...) or config.components[0].sources.push(...) throws, not just reassigning config.types itself. */
+function freezeConfig(config) {
+  for (const key of [...LIST_FIELDS, 'roles', 'gates', 'agent', 'agentEnvStrip']) Object.freeze(config[key]);
+  for (const component of config.components) { Object.freeze(component.sources); Object.freeze(component); }
+  Object.freeze(config.components);
+  return Object.freeze(config);
+}
+
 function validateComponents(raw, problems) {
   if (!Array.isArray(raw) || raw.length === 0) { problems.push('components must have at least one entry'); return []; }
   const out = raw.map((c, i) => {
@@ -66,6 +82,7 @@ export function validateConfig(raw) {
   const agent = raw.agent ?? AGENT_DEFAULTS.claude;
   if (!isStringArray(agent) || agent.length === 0) problems.push('agent must be an array of strings (argv), never a shell string');
   config.agent = isStringArray(agent) ? [...agent] : [...AGENT_DEFAULTS.claude];
+  if (isStringArray(agent)) validateAgentPlaceholders(config.agent, problems);
   const strip = raw.agentEnvStrip ?? DEFAULTS.agentEnvStrip;
   if (!isStringArray(strip)) problems.push('agentEnvStrip must be an array of strings');
   config.agentEnvStrip = isStringArray(strip) ? [...strip] : [...DEFAULTS.agentEnvStrip];
@@ -77,7 +94,7 @@ export function validateConfig(raw) {
   config.port = raw.port ?? DEFAULTS.port;
   if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) problems.push('port must be an integer between 1 and 65535');
   if (problems.length) return { ok: false, problems };
-  return { ok: true, config: Object.freeze(config) };
+  return { ok: true, config: freezeConfig(config) };
 }
 
 export async function loadConfig(repoRoot) {

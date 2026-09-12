@@ -23,8 +23,13 @@ test('actors is required when config has roles and forbidden when it has none', 
 });
 
 test('optional fields default cleanly', () => {
-  const c = sampleCase({ testData: undefined, postconditions: undefined, references: undefined, tags: undefined, automation: undefined, estimateMinutes: undefined, objective: undefined });
+  const c = sampleCase({ testData: undefined, postconditions: undefined, references: undefined, tags: undefined, automation: undefined, estimateMinutes: undefined });
   assert.deepEqual(validateCase(c, TEST_CONFIG), []);
+});
+
+test('objective is required', () => {
+  assert.match(validateCase(sampleCase({ objective: undefined }), TEST_CONFIG).join('\n'), /objective must be a non-empty string/);
+  assert.match(validateCase(sampleCase({ objective: '' }), TEST_CONFIG).join('\n'), /objective must be a non-empty string/);
 });
 
 test('validateExecutionPatch accepts status and actual, rejects others', () => {

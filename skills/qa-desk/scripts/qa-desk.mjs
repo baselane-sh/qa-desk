@@ -26,7 +26,7 @@ export function parseArgs(argv) {
   if (rest.length && !rest[0].startsWith('--')) out.command = rest.shift();
   while (rest.length) {
     const flag = rest.shift();
-    if (flag === '--repo') out.repo = rest.shift() ?? null;
+    if (flag === '--repo') { if (!rest.length) throw new Error('--repo requires a value'); out.repo = rest.shift(); }
     else if (flag === '--agent') out.agent = rest.shift() ?? 'claude';
     else throw new Error(`unknown option ${flag}`);
   }

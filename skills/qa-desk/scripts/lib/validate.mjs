@@ -37,7 +37,7 @@ export function validateCase(c, config) {
   const idRe = new RegExp(`^${config.project}-\\d+$`);
   if (typeof c.id !== 'string' || !idRe.test(c.id)) problems.push(`id must match ${config.project}-<digits>`);
   if (!isStr(c.title)) problems.push('title must be a non-empty string');
-  if (c.objective !== undefined && typeof c.objective !== 'string') problems.push('objective must be a string');
+  if (!isStr(c.objective)) problems.push('objective must be a non-empty string');
   checkEnum(problems, 'component', c.component, config.components.map((x) => x.name));
   checkActors(problems, c.actors, config.roles);
   checkEnum(problems, 'type', c.type, config.types);
