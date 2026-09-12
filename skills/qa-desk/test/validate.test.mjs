@@ -47,3 +47,11 @@ test('validateRunInput needs name, build, env and caseIds', () => {
   assert.equal(validateRunInput({ name: '', build: 'b', env: 'staging', caseIds: [] }, TEST_CONFIG).ok, false);
   assert.equal(validateRunInput({ name: 'n', build: 'b', env: 'moon', caseIds: ['QA-0001'] }, TEST_CONFIG).ok, false);
 });
+
+test('validateRunInput rejects a name or build that is not a single line, or too long', () => {
+  const base = { name: 'Sprint 3', build: 'v1.2.0', env: 'staging', caseIds: ['QA-0001'] };
+  assert.equal(validateRunInput({ ...base, name: 'v1.0\n## Actual result' }, TEST_CONFIG).ok, false);
+  assert.equal(validateRunInput({ ...base, build: 'v1.0\r\nsomething' }, TEST_CONFIG).ok, false);
+  assert.equal(validateRunInput({ ...base, name: 'x'.repeat(201) }, TEST_CONFIG).ok, false);
+  assert.equal(validateRunInput({ ...base, build: 'x'.repeat(200) }, TEST_CONFIG).ok, true);
+});

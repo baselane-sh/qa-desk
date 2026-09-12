@@ -2,11 +2,17 @@ export const EXECUTION_STATUSES = Object.freeze(['passed', 'failed', 'blocked', 
 export const DISPATCH_STATES = Object.freeze(['queued', 'running', 'pr-open', 'failed']);
 export const AUTOMATION = Object.freeze(['manual', 'candidate', 'automated']);
 const MAX_TEXT = 20_000;
+const MAX_LINE = 200;
 const ANY = 'any';
 
 const isStr = (v) => typeof v === 'string' && v.length > 0;
 const isStrArray = (v) => Array.isArray(v) && v.every((s) => typeof s === 'string');
 const oneOf = (list) => `must be one of ${list.join(', ')}`;
+// A run's name and build are free text a person types and land directly in the defect body as
+// plain lines. Without this, a newline lets one of them forge a Markdown heading or fence
+// there, the same escape closed for the actual result field.
+const CONTROL_OR_NEWLINE = /[\r\n\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
+const isSingleLine = (v) => isStr(v) && v.length <= MAX_LINE && !CONTROL_OR_NEWLINE.test(v);
 
 function checkEnum(problems, field, value, list) {
   if (!list.includes(value)) problems.push(`${field} ${oneOf(list)}`);
@@ -86,8 +92,8 @@ export function validateExecutionPatch(body, config) {
 
 export function validateRunInput(body, config) {
   if (!body || typeof body !== 'object') return { ok: false, error: 'body must be an object' };
-  if (!isStr(body.name)) return { ok: false, error: 'name must be a non-empty string' };
-  if (!isStr(body.build)) return { ok: false, error: 'build must be a non-empty string' };
+  if (!isSingleLine(body.name)) return { ok: false, error: `name must be a single line of up to ${MAX_LINE} characters` };
+  if (!isSingleLine(body.build)) return { ok: false, error: `build must be a single line of up to ${MAX_LINE} characters` };
   if (!config.environments.includes(body.env)) return { ok: false, error: `env ${oneOf(config.environments)}` };
   const locale = body.locale ?? config.locales[0];
   if (!config.locales.includes(locale)) return { ok: false, error: `locale ${oneOf(config.locales)}` };
