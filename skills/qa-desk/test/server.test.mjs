@@ -225,3 +225,17 @@ test('an execution carries evidence and an env override into the defect body', a
   assert.match(created[0].body, /logs\/app\.log line 42/);
   await s.close();
 });
+
+test('runs carry a status summary in the list and in the detail', async (t) => {
+  const s = await boot();
+  t.after(() => s.close());
+  await makeRun(s);
+  await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'passed' });
+  const list = await s.call('GET', '/api/runs');
+  assert.equal(list.body.data[0].summary.total, 2);
+  assert.equal(list.body.data[0].summary.executed, 1);
+  assert.deepEqual(list.body.data[0].summary.counts, { passed: 1, failed: 0, blocked: 0, skipped: 0, retest: 0, untested: 1 });
+  const one = await s.call('GET', '/api/runs/R-0001');
+  assert.equal(one.body.data.summary.executed, 1);
+  assert.equal(one.body.data.executions['QA-0001'].status, 'passed');
+});

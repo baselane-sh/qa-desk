@@ -7,7 +7,7 @@ import { loadConfig } from './lib/config.mjs';
 import { dataPaths } from './lib/paths.mjs';
 import { readJson } from './lib/store.mjs';
 import { validateExecutionPatch, validateRunInput } from './lib/validate.mjs';
-import { createRun, listRuns, getRun, closeRun, recordExecution, listExecutions, caseHistory } from './lib/runs.mjs';
+import { createRun, listRuns, getRun, closeRun, recordExecution, listExecutions, caseHistory, runSummary } from './lib/runs.mjs';
 import { createDefect, getDefect, findDefect, listDefects } from './lib/defects.mjs';
 import { buildDefectTitle, buildDefectBody } from './lib/defect-body.mjs';
 import { createTracker } from './lib/tracker.mjs';
@@ -129,6 +129,17 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
     }
   }
 
+  async function listRunsRoute() {
+    const runs = await listRuns(paths);
+    return Promise.all(runs.map(async (run) => ({ ...run, summary: await runSummary(paths, run) })));
+  }
+
+  async function getRunRoute(id) {
+    const run = await loadRun(id);
+    const executions = Object.fromEntries(await listExecutions(paths, id));
+    return { ...run, executions, summary: await runSummary(paths, run) };
+  }
+
   async function executionRoute(req, runId, caseId) {
     const v = validateExecutionPatch(await readBody(req), config);
     if (!v.ok) throw new HttpError(400, v.error);
@@ -199,10 +210,10 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
     ['GET', /^\/api\/config$/, async () => config],
     ['GET', /^\/api\/cases$/, async (req, [], url) => casesRoute(url)],
     ['GET', /^\/api\/cases\/([\w-]+)\/history$/, async (req, [id]) => { await loadCase(id); return caseHistory(paths, id); }],
-    ['GET', /^\/api\/runs$/, async () => listRuns(paths)],
+    ['GET', /^\/api\/runs$/, async () => listRunsRoute()],
     ['POST', /^\/api\/runs$/, async (req) => createRunRoute(req)],
     ['POST', /^\/api\/runs\/([\w-]+)\/close$/, async (req, [id]) => closeRunRoute(id)],
-    ['GET', /^\/api\/runs\/([\w-]+)$/, async (req, [id]) => ({ ...(await loadRun(id)), executions: Object.fromEntries(await listExecutions(paths, id)) })],
+    ['GET', /^\/api\/runs\/([\w-]+)$/, async (req, [id]) => getRunRoute(id)],
     ['PUT', /^\/api\/runs\/([\w-]+)\/executions\/([\w-]+)$/, async (req, [runId, caseId]) => executionRoute(req, runId, caseId)],
     ['POST', /^\/api\/defects$/, async (req) => createDefectRoute(req)],
     ['GET', /^\/api\/defects\/([\w-]+)$/, async (req, [id]) => showDefectRoute(id)],

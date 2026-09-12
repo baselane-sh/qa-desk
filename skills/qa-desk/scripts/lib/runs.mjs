@@ -2,6 +2,7 @@ import { readJsonl, latestBy, withJsonlQueue, writeJsonlLine } from './jsonl.mjs
 
 const PAD = 4;
 const RUN_PREFIX = 'R-';
+export const SUMMARY_STATUSES = Object.freeze(['passed', 'failed', 'blocked', 'skipped', 'retest', 'untested']);
 const defaultNow = () => new Date().toISOString();
 
 function nextRunId(runs) {
@@ -67,4 +68,15 @@ export async function recordExecution(paths, { runId, caseId, ...patch }, { now 
     await writeJsonlLine(paths.executions, execution);
     return execution;
   });
+}
+
+/** Only the run's frozen caseIds count, so a later regeneration cannot move the numbers. */
+export async function runSummary(paths, run) {
+  const latest = await listExecutions(paths, run.id);
+  const counts = Object.fromEntries(SUMMARY_STATUSES.map((s) => [s, 0]));
+  for (const caseId of run.caseIds) {
+    const status = latest.get(caseId)?.status;
+    counts[SUMMARY_STATUSES.includes(status) ? status : 'untested'] += 1;
+  }
+  return { total: run.caseIds.length, executed: run.caseIds.length - counts.untested, counts };
 }

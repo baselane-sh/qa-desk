@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createRun, listRuns, getRun, closeRun, recordExecution, listExecutions, caseHistory } from '../scripts/lib/runs.mjs';
+import { createRun, listRuns, getRun, closeRun, recordExecution, listExecutions, caseHistory, runSummary } from '../scripts/lib/runs.mjs';
 import { dataPaths } from '../scripts/lib/paths.mjs';
 
 const now = () => '2026-09-12T10:00:00.000Z';
@@ -70,4 +70,21 @@ test('closeRun stamps closedAt once and a closed run takes no more executions', 
   await assert.rejects(closeRun(p, 'R-0001', { now }), /run R-0001 is already closed/);
   await assert.rejects(closeRun(p, 'R-0009', { now }), /unknown run R-0009/);
   await assert.rejects(recordExecution(p, { runId: 'R-0001', caseId: 'QA-0001', status: 'passed' }, { now }), /run R-0001 is closed/);
+});
+
+test('runSummary counts every status and derives untested from absence', async () => {
+  const p = await paths();
+  const run = await createRun(p, { ...input, caseIds: ['QA-0001', 'QA-0002', 'QA-0003'] }, { now });
+  assert.deepEqual(await runSummary(p, run), {
+    total: 3,
+    executed: 0,
+    counts: { passed: 0, failed: 0, blocked: 0, skipped: 0, retest: 0, untested: 3 },
+  });
+  await recordExecution(p, { runId: run.id, caseId: 'QA-0001', status: 'passed' }, { now });
+  await recordExecution(p, { runId: run.id, caseId: 'QA-0002', status: 'failed' }, { now });
+  await recordExecution(p, { runId: run.id, caseId: 'QA-0002', status: 'retest' }, { now });
+  const summary = await runSummary(p, run);
+  assert.equal(summary.total, 3);
+  assert.equal(summary.executed, 2);
+  assert.deepEqual(summary.counts, { passed: 1, failed: 0, blocked: 0, skipped: 0, retest: 1, untested: 1 });
 });
