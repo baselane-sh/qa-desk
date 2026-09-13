@@ -36,7 +36,19 @@ export function createDispatcher({ spawn, execFile, paths, repoRoot, config, tra
     // Claimed synchronously, in the same tick as the shift, so a call to enqueue that
     // interleaves with this one sees running already set and queues instead of spawning.
     running = next.id;
-    start(next.id, next.model).catch((err) => console.error(`qa-desk: could not start the next queued dispatch ${next.id}: ${err.message}`));
+    start(next.id, next.model).catch(async (err) => {
+      // Without this, a prepare() failure here (most often a recovered dispatch whose
+      // in-memory model was lost across a restart, see recoverOnStart) left the defect's
+      // on-disk state at 'queued' forever: the only report was this console line, and the UI
+      // only enables Dispatch again from 'failed' or 'pr-open'. Recording the failure here
+      // puts it back in a state the tester can retry from.
+      try {
+        await patchDispatch(paths, next.id, { state: 'failed', endedAt: now(), error: err.message });
+      } catch (writeErr) {
+        console.error(`qa-desk: could not record the start failure for ${next.id}: ${writeErr.message}`);
+      }
+      console.error(`qa-desk: could not start the next queued dispatch ${next.id}: ${err.message}`);
+    });
   }
 
   /**

@@ -7,9 +7,11 @@ import { captureField, restoreField } from './ui-restore.js';
 import { connectionLabel, OFFLINE_HELP } from './status.js';
 
 const VIEWS = { cases: renderCases, runs: renderRuns };
-const IDLE_SAVE_STATE = { actual: { status: 'idle', at: null, draft: null }, evidence: { status: 'idle', at: null, draft: null } };
+// caseId isolates this shared, single-slot save state to whichever case it was actually
+// written for (see fieldValue/saveStateNode); null never matches a real case id.
+const IDLE_SAVE_STATE = { caseId: null, actual: { status: 'idle', at: null, draft: null }, evidence: { status: 'idle', at: null, draft: null } };
 
-let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], historyLoaded: false, defect: null, log: '', logVisible: false, bootError: null, showClosed: false, confirmClose: null, help: false, scrollToSelected: false, online: true, saveState: IDLE_SAVE_STATE };
+let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], historyLoaded: false, defect: null, log: '', logVisible: false, bootError: null, showClosed: false, confirmClose: null, help: false, scrollToSelected: false, online: true, saveState: IDLE_SAVE_STATE, filtersOpen: false, dispatchModel: null };
 const root = document.getElementById('root');
 const overlayRoot = document.getElementById('overlay-root');
 const toastEl = document.getElementById('toast');
@@ -58,7 +60,11 @@ async function loadCases() {
 async function selectCase(id) {
   const token = ++selectCase.token;
   clearPoll();
-  setState({ selectedId: id, history: [], historyLoaded: false, defect: null, log: '', logVisible: false, scrollToSelected: true, saveState: IDLE_SAVE_STATE });
+  // saveState is left as-is here on purpose: it already carries the case id it belongs to
+  // (see fieldValue), so switching cases no longer needs to reset it, and a failed draft for
+  // the case just left is not silently dropped, it just stops being shown until that case is
+  // selected again.
+  setState({ selectedId: id, history: [], historyLoaded: false, defect: null, log: '', logVisible: false, scrollToSelected: true });
   if (!id) return;
   const history = await api.get(`/api/cases/${encodeURIComponent(id)}/history`);
   const defect = state.run ? await findDefect(state.run.id, id) : null;
@@ -93,9 +99,11 @@ function nowLabel() {
 // touches status, duration, env or locale leaves saveState untouched (fields is empty). A
 // failed save keeps its draft (the value the tester typed) so a redraw can put it straight
 // back in the field instead of falling back to the last saved value; a saved one clears it.
-function markFields(fields, status, at = null, draftPatch = null) {
+// caseId is stamped on every write so fieldValue/saveStateNode can tell "this case's own
+// save state" from "the case that was selected the last time a write completed".
+function markFields(caseId, fields, status, at = null, draftPatch = null) {
   if (!fields.length) return state.saveState;
-  const next = { ...state.saveState };
+  const next = { ...state.saveState, caseId };
   for (const f of fields) next[f] = { status, at, draft: draftPatch?.[f] ?? null };
   return next;
 }
@@ -125,21 +133,30 @@ async function record(caseId, patch) {
   try {
     execution = await api.put(`/api/runs/${encodeURIComponent(state.run.id)}/executions/${encodeURIComponent(caseId)}`, patch);
   } catch (err) {
-    setState({
-      cases: state.cases.map((c) => (c.id === caseId ? { ...c, execution: previousExecution } : c)),
-      saveState: markFields(fields, 'failed', null, patch),
-    });
+    // The cases rollback is gated on this call still being the most recent one for this
+    // case. Without the gate, a slower failing call (A) can restore its stale pre-image over
+    // a faster call (B) that already succeeded and is on screen: press two verdicts quickly,
+    // B lands first and shows the server's answer, then A fails and would otherwise wipe it
+    // back out. The field itself is still marked failed either way, so the draft is never lost.
+    //
+    // Residual, not closed by this gate: if A and B *both* fail, B's own previousExecution is
+    // A's optimistic value, which the server never confirmed, so B's rollback (when it is the
+    // most recent) restores a verdict that was never real. Closing that needs a refetch of
+    // this case's execution on failure instead of restoring a captured pre-image.
+    const patchOut = { saveState: markFields(caseId, fields, 'failed', null, patch) };
+    if (token === recordToken) patchOut.cases = state.cases.map((c) => (c.id === caseId ? { ...c, execution: previousExecution } : c));
+    setState(patchOut);
     throw err;
   }
   const history = state.selectedId === caseId ? await api.get(`/api/cases/${encodeURIComponent(caseId)}/history`) : state.history;
   if (token !== recordToken) {
     // A newer call for this case already owns `cases`/`history`, but this write still
     // succeeded: its field must not be left showing a stale draft or a stale 'failed' label.
-    if (fields.length) setState({ saveState: markFields(fields, 'saved', nowLabel()) });
+    if (fields.length) setState({ saveState: markFields(caseId, fields, 'saved', nowLabel()) });
     return;
   }
   const cases = state.cases.map((c) => (c.id === caseId ? { ...c, execution } : c));
-  setState({ cases, history, saveState: markFields(fields, 'saved', nowLabel()) });
+  setState({ cases, history, saveState: markFields(caseId, fields, 'saved', nowLabel()) });
 }
 
 // caseHistory on the server is every append to executions.jsonl for this case, oldest first,
@@ -181,11 +198,18 @@ async function dispatch(defectId, model) {
 }
 
 async function refreshDefect(defectId) {
+  // clearPoll only cancels a pending timer, not a fetch already in flight: this call can
+  // still be running when the tester switches to a different case. selectCase.token is
+  // bumped on every case switch, so capturing it here and checking it again before this
+  // call's own setState/schedulePoll drops a stale answer instead of showing case A's
+  // defect (and re-arming its poll) inside case B's pane.
+  const token = selectCase.token;
   const defect = await api.get(`/api/defects/${encodeURIComponent(defectId)}`);
   let log = state.log;
   if (state.logVisible) {
     try { log = defect.dispatch?.log ? await api.text(`/api/defects/${encodeURIComponent(defectId)}/log`) : ''; } catch { log = ''; }
   }
+  if (token !== selectCase.token) return;
   setState({ defect, log });
   schedulePoll(defectId, defect.dispatch?.state);
 }
@@ -253,6 +277,8 @@ const actions = {
   closeRun: (runId) => guarded(() => closeCurrentRun(runId)),
   toggleClosed: () => setState({ showClosed: !state.showClosed }),
   setView: (view) => setState({ view, confirmClose: null }),
+  toggleFilters: () => setState({ filtersOpen: !state.filtersOpen }),
+  setDispatchModel: (model) => setState({ dispatchModel: model }),
 };
 
 // A redraw replaces the whole pane subtree, which by default drops scroll position and

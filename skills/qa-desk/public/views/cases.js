@@ -161,7 +161,12 @@ export function renderList(state, actions, cases, total) {
       ]),
       el('span', { class: 'meta', text: [c.component, ...(c.actors ?? [])].join(' · ') }),
       chips.length ? el('span', { class: 'chips' }, chips.map((x) => el('span', { class: x.className, text: x.text }))) : null,
-      badges.length ? el('span', { class: 'meta' }, badges.map((b) => el('span', { class: `status ${b.status}`, title: b.runId, text: `${b.runId} ${b.status}` }))) : null,
+      // A full uppercase status badge per open run was the same wall of grey blocks the
+      // verdict dot at the front of the row exists to remove, reintroduced one line below
+      // it (with two or three runs open, three of them). A dot with the run and status in
+      // its title gets the same treatment as statusOf(c) above; there is nowhere in the
+      // detail pane today that shows a case's per-run history, so nothing full-size is lost.
+      badges.length ? el('span', { class: 'meta run-badges' }, badges.map((b) => el('span', { class: `verdict-dot ${b.status}`, title: `${b.runId}: ${b.status}` }))) : null,
     ]);
   }));
 }
@@ -193,11 +198,13 @@ export function renderCaseDetail(c, state) {
   ]);
 }
 
-// Below the two-column breakpoint the filters pane is hidden behind this button, which just
-// flips a CSS class on the pane it is not itself part of (it lives in the list pane's
-// pane-head, which stays visible, so it can still be reached once the filters pane is hidden).
-export function filtersToggleButton() {
-  return el('button', { class: 'filters-toggle', text: 'Filters', onclick: () => document.querySelector('[data-pane="filters"]')?.classList.toggle('open') });
+// Below the two-column breakpoint the filters pane is hidden behind this button, which sets
+// filtersOpen in state (it lives in the list pane's pane-head, which stays visible, so it
+// can still be reached once the filters pane is hidden). Earlier this flipped an `.open`
+// class straight on the pane's DOM node, which the very next redraw silently rebuilt without
+// the class, closing the pane on every single filter change.
+export function filtersToggleButton(actions) {
+  return el('button', { class: 'filters-toggle', text: 'Filters', onclick: () => actions.toggleFilters() });
 }
 
 export function renderCases(root, state, actions) {
@@ -215,10 +222,11 @@ export function renderCases(root, state, actions) {
   const filtersHead = el('div', { class: 'pane-head' }, [
     el('h2', { text: 'Filters' }),
     isDefaultFilters(state.filters) ? null : el('button', { text: 'Clear', onclick: () => actions.clearFilters() }),
+    el('button', { class: 'filters-toggle', text: 'Close', onclick: () => actions.toggleFilters() }),
   ]);
   root.append(
-    el('aside', { class: 'pane', 'data-pane': 'filters' }, [filtersHead, renderFilters(state, actions), el('h2', { text: 'Progress', style: 'margin-top:16px' }), renderProgress(state)]),
-    el('section', { class: 'pane', 'data-pane': 'list' }, [el('div', { class: 'pane-head' }, [el('h2', { text: tallyLabel({ visible: visible.length, total, counts: tallyCounts(visible) }) }), filtersToggleButton()]), renderList(state, actions, visible, total)]),
+    el('aside', { class: `pane${state.filtersOpen ? ' open' : ''}`, 'data-pane': 'filters' }, [filtersHead, renderFilters(state, actions), el('h2', { text: 'Progress', style: 'margin-top:16px' }), renderProgress(state)]),
+    el('section', { class: 'pane', 'data-pane': 'list' }, [el('div', { class: 'pane-head' }, [el('h2', { text: tallyLabel({ visible: visible.length, total, counts: tallyCounts(visible) }) }), filtersToggleButton(actions)]), renderList(state, actions, visible, total)]),
     el('section', { class: 'pane', 'data-pane': 'detail' }, selected ? [renderCaseDetail(selected, state)] : [el('p', { class: 'empty', text: 'Select a case. Keys: j/k move, p f b s r record in the current run.' })]),
   );
 }

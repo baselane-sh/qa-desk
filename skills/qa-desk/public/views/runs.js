@@ -158,8 +158,10 @@ function pickList(values, current, locked, onchange, focusKey) {
   return box;
 }
 
-function saveStateNode(state, field) {
-  const info = state.saveState?.[field];
+// saveState is shared across every case; a label only belongs on screen while it was
+// written for the case being rendered right now (see fieldValue in status.js).
+function saveStateNode(state, field, caseId) {
+  const info = state.saveState?.caseId === caseId ? state.saveState?.[field] : null;
   const text = info ? saveStateLabel(info.status, info.at) : '';
   return text ? el('span', { class: `save-state ${info.status}`, text: ` · ${text}` }) : null;
 }
@@ -171,9 +173,9 @@ function executionPanel(c, state, actions) {
   const { env, locale } = executionDefaults(c, state.run);
   const buttons = el('div', { class: 'verdicts' }, STATUSES.map((s) => el('button', { class: `status-btn ${s === status ? 'on' : ''}`, text: s, onclick: () => actions.record(c.id, { status: s }) }, [el('kbd', { text: s[0] })])));
   const actual = el('textarea', { 'data-focus-key': 'actual', dir: 'auto', placeholder: 'Actual result: what you saw, step number, error text', disabled: lock, onblur: (e) => { if (e.target.value !== (c.execution?.actual ?? '')) actions.record(c.id, { actual: e.target.value }); } });
-  actual.value = fieldValue(state.saveState, c.execution, 'actual');
+  actual.value = fieldValue(state.saveState, c.execution, 'actual', c.id);
   const evidence = el('textarea', { 'data-focus-key': 'evidence', dir: 'auto', placeholder: 'Evidence: links or paths to screenshots, logs or recordings', disabled: lock, onblur: (e) => { if (e.target.value !== (c.execution?.evidence ?? '')) actions.record(c.id, { evidence: e.target.value }); } });
-  evidence.value = fieldValue(state.saveState, c.execution, 'evidence');
+  evidence.value = fieldValue(state.saveState, c.execution, 'evidence', c.id);
   const duration = el('input', { 'data-focus-key': 'duration', type: 'number', min: '0', placeholder: 'seconds', value: c.execution?.durationSec ?? '', disabled: lock, onblur: (e) => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= 0 && v !== c.execution?.durationSec) actions.record(c.id, { durationSec: v }); } });
   const envBox = pickList([...state.config.environments, 'any'], env, locked, (v) => actions.record(c.id, { env: v }), 'env');
   const localeBox = pickList([...state.config.locales, 'any'], locale, locked, (v) => actions.record(c.id, { locale: v }), 'locale');
@@ -181,8 +183,8 @@ function executionPanel(c, state, actions) {
     el('h4', { text: `Execution in ${state.run.id}` }),
     buttons,
     locked ? el('p', { class: 'muted', text: 'Record a status first. The details below open once this case has an execution.' }) : null,
-    el('label', { text: 'Actual result' }, [saveStateNode(state, 'actual'), actual]),
-    el('label', { text: 'Evidence' }, [saveStateNode(state, 'evidence'), evidence]),
+    el('label', { text: 'Actual result' }, [saveStateNode(state, 'actual', c.id), actual]),
+    el('label', { text: 'Evidence' }, [saveStateNode(state, 'evidence', c.id), evidence]),
     el('div', { class: 'fields' }, [
       el('label', { text: 'Duration (s)' }, [duration]),
       el('label', { text: 'Environment' }, [envBox]),
@@ -204,7 +206,14 @@ function defectPanel(c, state, actions) {
   const d = defect.dispatch;
   const issueLink = defect.url ? el('a', { href: defect.url, target: '_blank', text: `${defect.tracker} #${defect.issueId}` }) : el('span', { text: `${defect.tracker} ${defect.issueId}` });
   const canDispatch = !d || ['failed', 'pr-open'].includes(d.state);
-  const modelSelect = showModelPicker(state.config) ? el('select', { 'data-focus-key': 'dispatch-model' }, state.config.agentModels.map((m) => el('option', { value: m, text: m }))) : null;
+  // The select is rebuilt from config on every render (restoreUi only restores the one
+  // node that currently has focus), so the picked model has to be seeded from state or an
+  // unrelated redraw (any setState, e.g. the optimistic verdict write) silently snaps it back
+  // to config.agentModels[0] without telling the tester their choice was dropped.
+  const modelSelect = showModelPicker(state.config)
+    ? el('select', { 'data-focus-key': 'dispatch-model', onchange: (e) => actions.setDispatchModel(e.target.value) }, state.config.agentModels.map((m) => el('option', { value: m, text: m })))
+    : null;
+  if (modelSelect) modelSelect.value = state.dispatchModel ?? state.config.agentModels[0];
   const rows = [
     el('h4', { text: `Defect ${defect.id}` }),
     el('div', { class: 'kv' }, [el('span', { text: 'Issue' }), issueLink, el('span', { text: 'Issue state' }), el('span', { text: defect.issue?.state ?? 'unknown' }), el('span', { text: 'Dispatch' }), el('span', { text: d ? d.state : 'not started' })]),
@@ -224,9 +233,19 @@ function defectPanel(c, state, actions) {
 export function renderRuns(root, state, actions) {
   if (state.bootError) { root.append(el('p', { class: 'empty error', text: `Could not load qa-desk: ${state.bootError}` })); return; }
   if (!state.config) { root.append(el('p', { class: 'empty', text: 'Loading' })); return; }
-  const left = el('aside', { class: 'pane', 'data-pane': 'filters' }, [el('h2', { text: 'Runs' }), runList(state, actions), newRunForm(state, actions)]);
+  // The `.open` class used to be flipped straight on this DOM node by filtersToggleButton,
+  // which the next redraw (any setState at all, not just a filter change) silently threw
+  // away, closing the pane on every keystroke. It now comes from state, and the pane carries
+  // its own close control (filters-toggle is display:none above the breakpoint where this
+  // pane hides at all, same as the open button), since state-driven `.open` is otherwise the
+  // only way to close it and the button that opens it lives outside this pane.
+  const left = el('aside', { class: `pane${state.filtersOpen ? ' open' : ''}`, 'data-pane': 'filters' }, [
+    el('div', { class: 'pane-head' }, [el('h2', { text: 'Runs' }), el('button', { class: 'filters-toggle', text: 'Close', onclick: () => actions.toggleFilters() })]),
+    runList(state, actions),
+    newRunForm(state, actions),
+  ]);
   if (!state.run) {
-    root.append(left, el('section', { class: 'pane', 'data-pane': 'list' }, [el('div', { class: 'pane-head' }, [filtersToggleButton()]), el('p', { class: 'empty', text: 'Pick a run or create one' })]), el('section', { class: 'pane', 'data-pane': 'detail' }, [renderProgress(state)]));
+    root.append(left, el('section', { class: 'pane', 'data-pane': 'list' }, [el('div', { class: 'pane-head' }, [filtersToggleButton(actions)]), el('p', { class: 'empty', text: 'Pick a run or create one' })]), el('section', { class: 'pane', 'data-pane': 'detail' }, [renderProgress(state)]));
     return;
   }
   const inRunAll = inRunCases(state.cases, state.run);
@@ -238,6 +257,6 @@ export function renderRuns(root, state, actions) {
     : [renderProgress(state), ...(state.config.roles.length ? [el('h2', { text: 'By role' }), renderProgress(state, 'role')] : []), el('p', { class: 'empty', text: 'Select a case. Keys: j/k move, p f b s r record.' })];
   const summary = headerSummary(countStatuses(inRunAll), state.run.summary);
   const controls = el('div', { class: 'pane-head' }, [statusFilter(state, actions), closeControl(state, actions)]);
-  const head = el('div', {}, [el('div', { class: 'pane-head' }, [el('h2', { text: `${state.run.name} (${inRun.length})` }), el('span', { class: 'badge', text: summaryLabel(summary) }), filtersToggleButton()]), statusStrip(summary), controls]);
+  const head = el('div', {}, [el('div', { class: 'pane-head' }, [el('h2', { text: `${state.run.name} (${inRun.length})` }), el('span', { class: 'badge', text: summaryLabel(summary) }), filtersToggleButton(actions)]), statusStrip(summary), controls]);
   root.append(left, el('section', { class: 'pane', 'data-pane': 'list' }, [head, renderList(state, actions, inRun, inRunAll.length)]), el('section', { class: 'pane', 'data-pane': 'detail' }, right));
 }

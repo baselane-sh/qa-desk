@@ -305,6 +305,31 @@ test('a supplied model is ignored when the agent argv has no {model} placeholder
   assert.equal(s.children[0].args.includes('anything'), false);
 });
 
+test('a queued dispatch whose prepare() throws lands in failed instead of stranded in queued forever (I2)', async () => {
+  const config = { ...TEST_CONFIG, agent: ['claude', '--model', '{model}', 'Fix {issueId}'], agentModels: ['sonnet'] };
+  const s = await setup({ config });
+  const second = await createDefect(s.paths, { runId: 'R-0001', caseId: 'QA-0002', tracker: 'github', issueId: '18', url: 'u' }, { now });
+  await s.dispatcher.enqueue('D-0001', { model: 'sonnet' });
+  // No model supplied while the template requires one (the same shape recoverOnStart
+  // produces for a dispatch stranded in `queued` across a restart, since the in-memory model
+  // is lost). This one queues behind D-0001 rather than failing immediately, because enqueue
+  // itself only validates the model for whichever dispatch starts right away.
+  const queued = await s.dispatcher.enqueue(second.id, { model: undefined });
+  assert.deepEqual(queued, { state: 'queued' });
+
+  endChild(s.children[0], 0);
+  const deadline = Date.now() + 3000;
+  let d = await getDefect(s.paths, second.id);
+  while (d.dispatch.state === 'queued') {
+    if (Date.now() > deadline) throw new Error(`the queued dispatch is stranded in queued forever (state: ${d.dispatch.state})`);
+    await new Promise((r) => setTimeout(r, 5));
+    d = await getDefect(s.paths, second.id);
+  }
+  assert.equal(d.dispatch.state, 'failed');
+  assert.match(d.dispatch.error, /model/);
+  assert.equal(s.children.length, 1, 'prepare() throwing must never reach spawn');
+});
+
 test('enqueue refuses an issue id that is not a plain identifier', async () => {
   const s = await setup();
   const { patchDefect } = await import('../scripts/lib/defects.mjs');

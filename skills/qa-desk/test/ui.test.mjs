@@ -74,10 +74,22 @@ test('recording a status refreshes the case history', async () => {
   assert.match(text.slice(start, end), /\/history/, 'record must refetch the history');
 });
 
-test('the execution textareas seed from the unsaved draft, never straight from the saved value', async () => {
+test('a failed write only rolls back the case row when no newer write for that case has already landed (I1)', async () => {
+  const text = await read('app.js');
+  const start = text.indexOf('async function record(');
+  const end = text.indexOf('async function undo(');
+  const body = text.slice(start, end);
+  assert.match(
+    body,
+    /if \(token === recordToken\) patchOut\.cases = state\.cases\.map/,
+    'the rollback of `cases` on a failed write must be gated on this still being the most recent call for the case',
+  );
+});
+
+test('the execution textareas seed from the unsaved draft, never straight from the saved value, and are keyed to the case on screen', async () => {
   const text = await read('views/runs.js');
-  assert.match(text, /actual\.value = fieldValue\(state\.saveState, c\.execution, 'actual'\)/);
-  assert.match(text, /evidence\.value = fieldValue\(state\.saveState, c\.execution, 'evidence'\)/);
+  assert.match(text, /actual\.value = fieldValue\(state\.saveState, c\.execution, 'actual', c\.id\)/);
+  assert.match(text, /evidence\.value = fieldValue\(state\.saveState, c\.execution, 'evidence', c\.id\)/);
 });
 
 test('keyToStatus ignores a key held with a modifier and maps a bare key to its status', async () => {
@@ -376,6 +388,17 @@ test('fieldValue reads the unsaved draft while a save has failed, otherwise the 
   assert.equal(fieldValue(null, null, 'actual'), '');
 });
 
+test('fieldValue ignores a draft left by another case, so a case switch cannot seed the wrong box (C1)', async () => {
+  const { fieldValue } = await import('../public/status.js');
+  const saveState = { caseId: 'QA-0001', actual: { status: 'failed', draft: 'case 1 text' } };
+  // Same case as the failed save: the draft still shows, so the tester does not retype it.
+  assert.equal(fieldValue(saveState, { actual: 'saved for QA-0001' }, 'actual', 'QA-0001'), 'case 1 text');
+  // A different case reading the very same (shared) saveState slot must never see that
+  // draft: it is not this case's draft, and this case's own saved value must win instead.
+  assert.equal(fieldValue(saveState, { actual: 'saved for QA-0002' }, 'actual', 'QA-0002'), 'saved for QA-0002');
+  assert.equal(fieldValue(saveState, {}, 'actual', 'QA-0002'), '');
+});
+
 test('tallyLabel counts what is on screen and what is marked', async () => {
   const { tallyLabel } = await import('../public/status.js');
   assert.equal(tallyLabel({ visible: 600, total: 600, counts: { passed: 0, failed: 0 } }), '600 cases');
@@ -388,6 +411,19 @@ test('progressBarLabel spells the breakdown out in words, in order, and omits ze
   assert.equal(progressBarLabel('auth', { passed: 4, failed: 1, blocked: 0, skipped: 0, retest: 0 }, 12), 'auth: 4 passed, 1 failed, 7 untested of 12');
   assert.equal(progressBarLabel('billing', { passed: 0, failed: 0, blocked: 0, skipped: 0, retest: 0 }, 5), 'billing: 5 untested of 5');
   assert.equal(progressBarLabel('auth', { passed: 3, failed: 0, blocked: 0, skipped: 0, retest: 0 }, 3), 'auth: 3 passed of 3');
+});
+
+test('tallyCounts counts each real verdict among the given cases and omits zero entries (M3)', async () => {
+  const { tallyCounts } = await import('../public/views/cases.js');
+  const cases = [
+    { execution: { status: 'passed' } },
+    { execution: { status: 'passed' } },
+    { execution: { status: 'failed' } },
+    { execution: { status: 'nonsense' } },
+    {},
+  ];
+  assert.deepEqual(tallyCounts(cases), { passed: 2, failed: 1 });
+  assert.deepEqual(tallyCounts([]), {});
 });
 
 test('dispatchButtonLabel names Agent running, Dispatch again after a failure, and the plain label otherwise', async () => {
@@ -416,6 +452,22 @@ test('the defect panel wires the model select, the dispatch label and the log to
   assert.match(text, /state\.logVisible \? 'Hide log' : 'Show log'/);
 });
 
+test('the model picker is seeded from state and writes back to it, so it survives the redraw an unrelated verdict click causes (I5)', async () => {
+  const text = await read('views/runs.js');
+  assert.match(text, /onchange: \(e\) => actions\.setDispatchModel\(e\.target\.value\)/, 'picking a model must be saved into state, not left to die with the old DOM node');
+  assert.match(text, /modelSelect\.value = state\.dispatchModel \?\? state\.config\.agentModels\[0\]/, 'the select must be seeded from the saved model on every render');
+});
+
+test('the filters pane opens and closes through state, not a DOM class flip a redraw silently undoes (I4)', async () => {
+  const cases = await read('views/cases.js');
+  assert.match(cases, /export function filtersToggleButton\(actions\)/, 'the toggle must take actions rather than reach into the DOM itself');
+  assert.doesNotMatch(cases, /document\.querySelector\('\[data-pane="filters"\]'\)/, 'the toggle must not flip a class on the pane node directly');
+  assert.match(cases, /'aside', \{ class: `pane\$\{state\.filtersOpen \? ' open' : ''\}`, 'data-pane': 'filters' \}/, 'the pane\'s open class must be derived from state.filtersOpen on every render');
+  assert.match(cases, /el\('button', \{ class: 'filters-toggle', text: 'Close', onclick: \(\) => actions\.toggleFilters\(\) \}\)/, 'the pane needs its own close control now that .open can only be reached from state');
+  const runs = await read('views/runs.js');
+  assert.match(runs, /class: `pane\$\{state\.filtersOpen \? ' open' : ''\}`/, 'the Runs view filters pane must be driven by the same state flag');
+});
+
 test('a running dispatch is polled every 5000ms, and the poll is cleared before every case or run switch', async () => {
   const text = await read('app.js');
   assert.match(text, /function schedulePoll\(defectId, dispatchState\) \{/);
@@ -425,6 +477,15 @@ test('a running dispatch is polled every 5000ms, and the poll is cleared before 
   assert.match(selectCaseBody, /clearPoll\(\);/, 'switching cases must clear any earlier poll');
   const selectRunBody = text.slice(text.indexOf('async function selectRun('), text.indexOf('let recordToken'));
   assert.match(selectRunBody, /clearPoll\(\);/, 'switching runs must clear any earlier poll');
+});
+
+test('refreshDefect drops a stale answer instead of showing a previous case\'s defect (I3)', async () => {
+  const text = await read('app.js');
+  const start = text.indexOf('async function refreshDefect(');
+  const end = text.indexOf('async function toggleLog(');
+  const body = text.slice(start, end);
+  assert.match(body, /const token = selectCase\.token;/, 'refreshDefect must capture the current case token before its first await');
+  assert.match(body, /if \(token !== selectCase\.token\) return;/, 'a case switch during the fetch must be checked before setState/schedulePoll run');
 });
 
 test('chipsFor labels a case with one chip per fact and a class per value', async () => {

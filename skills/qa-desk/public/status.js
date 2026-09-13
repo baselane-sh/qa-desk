@@ -35,7 +35,14 @@ export function tallyLabel({ visible, total, counts = {} }) {
 // A failed save must never make the tester retype what they wrote. saveState carries the
 // unsaved draft alongside the failure so a redraw can put it straight back in the field;
 // once a save succeeds the draft clears and the field falls back to the saved value.
-export function fieldValue(saveState, execution, field) {
-  const draft = saveState?.[field]?.draft;
+//
+// saveState is shared across every case (it is one slot in app.js's state, not one per
+// case), so it also carries the id of the case it belongs to. A draft only applies to the
+// case that produced it: reading it back for any other case (the normal result of a case
+// switch racing a save, see app.js's `record`) would seed that case's box with someone
+// else's text, so a caseId mismatch is treated exactly like no draft at all.
+export function fieldValue(saveState, execution, field, caseId) {
+  const matches = (saveState?.caseId ?? undefined) === caseId;
+  const draft = matches ? saveState?.[field]?.draft : undefined;
   return draft ?? execution?.[field] ?? '';
 }
