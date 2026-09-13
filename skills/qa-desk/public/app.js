@@ -9,7 +9,7 @@ import { connectionLabel, OFFLINE_HELP, nextSaveState } from './status.js';
 const VIEWS = { cases: renderCases, runs: renderRuns };
 // caseId isolates this shared, single-slot save state to whichever case it was actually
 // written for (see fieldValue/saveStateNode); null never matches a real case id.
-const IDLE_SAVE_STATE = { caseId: null, actual: { status: 'idle', at: null, draft: null }, evidence: { status: 'idle', at: null, draft: null } };
+const IDLE_SAVE_STATE = { caseId: null, runId: null, actual: { status: 'idle', at: null, draft: null }, evidence: { status: 'idle', at: null, draft: null } };
 
 let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], historyLoaded: false, defect: null, log: '', logVisible: false, bootError: null, showClosed: false, confirmClose: null, help: false, scrollToSelected: false, online: true, saveState: IDLE_SAVE_STATE, filtersOpen: false, dispatchModel: null };
 const root = document.getElementById('root');
@@ -102,7 +102,7 @@ function nowLabel() {
 // caseId is stamped on every write so fieldValue/saveStateNode can tell "this case's own
 // save state" from "the case that was selected the last time a write completed".
 function markFields(caseId, fields, status, at = null, draftPatch = null) {
-  return nextSaveState(state.saveState, IDLE_SAVE_STATE, caseId, fields, status, at, draftPatch);
+  return nextSaveState(state.saveState, IDLE_SAVE_STATE, caseId, fields, status, at, draftPatch, state.run?.id ?? null);
 }
 
 // Two records on the same case inside one round trip can otherwise resolve out of order,

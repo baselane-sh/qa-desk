@@ -161,7 +161,8 @@ function pickList(values, current, locked, onchange, focusKey) {
 // saveState is shared across every case; a label only belongs on screen while it was
 // written for the case being rendered right now (see fieldValue in status.js).
 function saveStateNode(state, field, caseId) {
-  const info = state.saveState?.caseId === caseId ? state.saveState?.[field] : null;
+  const ownSlot = state.saveState?.caseId === caseId && (state.saveState?.runId ?? null) === (state.run?.id ?? null);
+  const info = ownSlot ? state.saveState?.[field] : null;
   const text = info ? saveStateLabel(info.status, info.at) : '';
   return text ? el('span', { class: `save-state ${info.status}`, text: ` · ${text}` }) : null;
 }
@@ -173,9 +174,9 @@ function executionPanel(c, state, actions) {
   const { env, locale } = executionDefaults(c, state.run);
   const buttons = el('div', { class: 'verdicts' }, STATUSES.map((s) => el('button', { class: `status-btn ${s === status ? 'on' : ''}`, text: s, onclick: () => actions.record(c.id, { status: s }) }, [el('kbd', { text: s[0] })])));
   const actual = el('textarea', { 'data-focus-key': 'actual', dir: 'auto', placeholder: 'Actual result: what you saw, step number, error text', disabled: lock, onblur: (e) => { if (e.target.value !== (c.execution?.actual ?? '')) actions.record(c.id, { actual: e.target.value }); } });
-  actual.value = fieldValue(state.saveState, c.execution, 'actual', c.id);
+  actual.value = fieldValue(state.saveState, c.execution, 'actual', c.id, state.run?.id ?? null);
   const evidence = el('textarea', { 'data-focus-key': 'evidence', dir: 'auto', placeholder: 'Evidence: links or paths to screenshots, logs or recordings', disabled: lock, onblur: (e) => { if (e.target.value !== (c.execution?.evidence ?? '')) actions.record(c.id, { evidence: e.target.value }); } });
-  evidence.value = fieldValue(state.saveState, c.execution, 'evidence', c.id);
+  evidence.value = fieldValue(state.saveState, c.execution, 'evidence', c.id, state.run?.id ?? null);
   const duration = el('input', { 'data-focus-key': 'duration', type: 'number', min: '0', placeholder: 'seconds', value: c.execution?.durationSec ?? '', disabled: lock, onblur: (e) => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= 0 && v !== c.execution?.durationSec) actions.record(c.id, { durationSec: v }); } });
   const envBox = pickList([...state.config.environments, 'any'], env, locked, (v) => actions.record(c.id, { env: v }), 'env');
   const localeBox = pickList([...state.config.locales, 'any'], locale, locked, (v) => actions.record(c.id, { locale: v }), 'locale');

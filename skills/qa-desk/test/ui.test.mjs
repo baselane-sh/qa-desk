@@ -88,8 +88,8 @@ test('a failed write only rolls back the case row when no newer write for that c
 
 test('the execution textareas seed from the unsaved draft, never straight from the saved value, and are keyed to the case on screen', async () => {
   const text = await read('views/runs.js');
-  assert.match(text, /actual\.value = fieldValue\(state\.saveState, c\.execution, 'actual', c\.id\)/);
-  assert.match(text, /evidence\.value = fieldValue\(state\.saveState, c\.execution, 'evidence', c\.id\)/);
+  assert.match(text, /actual\.value = fieldValue\(state\.saveState, c\.execution, 'actual', c\.id, state\.run\?\.id \?\? null\)/);
+  assert.match(text, /evidence\.value = fieldValue\(state\.saveState, c\.execution, 'evidence', c\.id, state\.run\?\.id \?\? null\)/);
 });
 
 test('keyToStatus ignores a key held with a modifier and maps a bare key to its status', async () => {
@@ -554,4 +554,22 @@ test('nextSaveState never carries one case save state onto another', async () =>
   assert.equal(sameCase.actual.draft, 'SECRET case 1 text');
   // an empty field list changes nothing at all
   assert.equal(nextSaveState(afterFail, idle, 'QA-0002', [], 'saved'), afterFail);
+});
+
+test('a failed draft never crosses a run change, so the same case in another run keeps its own text', async () => {
+  const { nextSaveState, fieldValue } = await import('../public/status.js');
+  const idle = { caseId: null, runId: null, actual: { status: 'idle', at: null, draft: null }, evidence: { status: 'idle', at: null, draft: null } };
+  // The tester is in run R-0001, the save of QA-0001's actual fails, and the typed text is
+  // held as a draft so the box does not go blank under them.
+  const afterFail = nextSaveState(idle, idle, 'QA-0001', ['actual'], 'failed', null, { actual: 'SECRET run 1 text' }, 'R-0001');
+  assert.equal(fieldValue(afterFail, { actual: 'saved in run 1' }, 'actual', 'QA-0001', 'R-0001'), 'SECRET run 1 text');
+  // They now switch to run R-0002 and open the same case. The draft belongs to the other
+  // run, so run 2's own saved value must win; otherwise the next blur or the pagehide
+  // flush writes run 1's text onto run 2's execution.
+  assert.equal(fieldValue(afterFail, { actual: 'saved in run 2' }, 'actual', 'QA-0001', 'R-0002'), 'saved in run 2');
+  assert.equal(fieldValue(afterFail, {}, 'actual', 'QA-0001', 'R-0002'), '');
+  // A write in run 2 must start from the idle slot, not inherit run 1's other field.
+  const afterRun2 = nextSaveState(afterFail, idle, 'QA-0001', ['evidence'], 'saved', '14:05:09', null, 'R-0002');
+  assert.equal(afterRun2.actual.draft, null);
+  assert.equal(afterRun2.runId, 'R-0002');
 });
