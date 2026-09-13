@@ -20,7 +20,6 @@ textarea { min-height: 90px; resize: vertical; }
 .badge { padding: 2px 8px; border-radius: 999px; background: #eef2f7; font-size: 12px; }
 .badge.muted { color: var(--muted); }
 .toast { margin-left: auto; padding: 4px 10px; border-radius: 6px; background: #fff3cd; color: #7a5b00; }
-.toast.error { background: #fde2e1; color: var(--fail); }
 .layout { display: grid; grid-template-columns: 240px minmax(320px, 1fr) minmax(360px, 1.3fr); gap: 12px; padding: 12px 16px; height: calc(100vh - 50px); }
 .pane { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: auto; padding: 12px; }
 .pane h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
@@ -97,8 +96,8 @@ kbd { display: inline-block; min-width: 18px; text-align: center; font: inherit;
 @media (max-width: 1100px) {
   .layout { grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.3fr); height: auto; }
   .filters-toggle { display: inline-block; }
-  .pane[data-pane="filters"] { display: none; }
-  .pane[data-pane="filters"].open { display: block; position: fixed; inset: 50px 12px 12px 12px; z-index: 5; height: auto; }
+  .pane[data-pane="filters"], .pane[data-pane="runs"] { display: none; }
+  .pane[data-pane="filters"].open, .pane[data-pane="runs"].open { display: block; position: fixed; inset: 50px 12px 12px 12px; z-index: 5; height: auto; }
 }
 @media (max-width: 760px) {
   .layout { grid-template-columns: 1fr; }

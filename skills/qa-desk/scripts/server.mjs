@@ -207,11 +207,15 @@ export function createApp({ config, paths, publicDir, tracker, dispatcher, execu
 
   async function dispatchRoute(req, id) {
     await loadDefect(id);
-    const { model } = await readBody(req);
+    // readBody returns {} for an empty body but the parsed value for a body of the literal
+    // `null`, which destructured to a TypeError and so a 500 instead of a clean rejection.
+    const { model } = (await readBody(req)) ?? {};
     try { return await dispatcher.enqueue(id, { model }); } catch (err) {
       if (/already running/.test(err.message)) throw new HttpError(409, err.message);
       if (/not a plain identifier/.test(err.message)) throw new HttpError(400, err.message);
-      if (/model/.test(err.message)) throw new HttpError(400, err.message);
+      // Narrow: only the dispatcher's own refusal of a model becomes a 400. Matching bare
+      // /model/ would turn an unrelated future error carrying that word into a 400 too.
+      if (/is not in the configured agentModels allowlist/.test(err.message)) throw new HttpError(400, err.message);
       throw err;
     }
   }

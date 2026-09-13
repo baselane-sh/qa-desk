@@ -207,8 +207,16 @@ export function renderCaseDetail(c, state) {
 // can still be reached once the filters pane is hidden). Earlier this flipped an `.open`
 // class straight on the pane's DOM node, which the very next redraw silently rebuilt without
 // the class, closing the pane on every single filter change.
+// The Runs view's aside is a run list and a create-run form, not filters, so it gets its own
+// label and its own open flag. Sharing one button and one flag put the run list behind a
+// button marked Filters on a narrow window, and opening either pane opened the other on a
+// view switch (M1, and the shared filtersOpen deferral).
+export function paneToggleButton(label, onClick) {
+  return el('button', { class: 'filters-toggle', text: label, onclick: onClick });
+}
+
 export function filtersToggleButton(actions) {
-  return el('button', { class: 'filters-toggle', text: 'Filters', onclick: () => actions.toggleFilters() });
+  return paneToggleButton('Filters', () => actions.toggleFilters());
 }
 
 export function renderCases(root, state, actions) {

@@ -314,3 +314,19 @@ test('executedBy comes from git config user.name and falls back to unknown', asy
   const source = await readFile(new URL('../scripts/server.mjs', import.meta.url), 'utf8');
   assert.match(source, /executedBy: await gitUserName\(repoRoot\)/, 'startServer must pass the git name as executedBy');
 });
+
+test('a dispatch body of the literal null is refused cleanly, not with a server error (M4)', async (t) => {
+  const s = await boot({ tracker: { name: 'github', create: async () => ({ id: '17', url: 'u' }), show: async () => ({ id: '17', url: 'u', state: 'open', notes: '' }) } });
+  t.after(() => s.close());
+  await makeRun(s);
+  await s.call('PUT', '/api/runs/R-0001/executions/QA-0001', { status: 'failed', actual: 'boom' });
+  await s.call('POST', '/api/defects', { runId: 'R-0001', caseId: 'QA-0001' });
+  // The call helper drops a falsy body entirely, so the raw request is sent here: readBody
+  // returns {} only for an EMPTY body, and parses a body of `null` to null, which used to
+  // destructure to a TypeError and so a 500.
+  const res = await fetch(`http://127.0.0.1:${s.port}/api/defects/D-0001/dispatch`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: 'null',
+  });
+  assert.notEqual(res.status, 500, 'a null body must not reach the caller as a server error');
+  assert.equal(res.status, 200, 'a null body carries no model, which is the same as sending none');
+});

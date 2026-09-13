@@ -4,14 +4,14 @@ import { renderRuns } from './views/runs.js';
 import { nextIndex, debounce, keyAction } from './keys.js';
 import { loadFilters, saveFilters } from './filters-store.js';
 import { captureField, restoreField } from './ui-restore.js';
-import { connectionLabel, OFFLINE_HELP, nextSaveState } from './status.js';
+import { connectionLabel, OFFLINE_HELP, nextSaveState, applyWrite, nextPollDelay } from './status.js';
 
 const VIEWS = { cases: renderCases, runs: renderRuns };
 // caseId isolates this shared, single-slot save state to whichever case it was actually
 // written for (see fieldValue/saveStateNode); null never matches a real case id.
 const IDLE_SAVE_STATE = { caseId: null, runId: null, actual: { status: 'idle', at: null, draft: null }, evidence: { status: 'idle', at: null, draft: null } };
 
-let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], historyLoaded: false, defect: null, log: '', logVisible: false, bootError: null, showClosed: false, confirmClose: null, help: false, scrollToSelected: false, online: true, saveState: IDLE_SAVE_STATE, filtersOpen: false, dispatchModel: null };
+let state = { config: null, cases: [], runs: [], run: null, executions: {}, selectedId: null, filters: {}, view: 'cases', history: [], historyLoaded: false, defect: null, log: '', logVisible: false, bootError: null, showClosed: false, confirmClose: null, help: false, scrollToSelected: false, online: true, saveState: IDLE_SAVE_STATE, filtersOpen: false, runsPaneOpen: false, dispatchModel: null };
 const root = document.getElementById('root');
 const overlayRoot = document.getElementById('overlay-root');
 const toastEl = document.getElementById('toast');
@@ -121,6 +121,7 @@ async function record(caseId, patch) {
   if (!state.run) { showBanner('Create or pick a run first'); return; }
   if (state.run.closedAt) { showBanner('This run is closed'); return; }
   const token = ++recordToken;
+  const runId = state.run.id;
   const fields = ['actual', 'evidence'].filter((f) => f in patch);
   const previousExecution = state.cases.find((c) => c.id === caseId)?.execution;
   if ('status' in patch) {
@@ -141,14 +142,16 @@ async function record(caseId, patch) {
     // most recent) restores a verdict that was never real. Closing that needs a refetch of
     // this case's execution on failure instead of restoring a captured pre-image.
     const patchOut = { saveState: markFields(caseId, fields, 'failed', null, patch) };
-    if (token === recordToken) patchOut.cases = state.cases.map((c) => (c.id === caseId ? { ...c, execution: previousExecution } : c));
+    if (applyWrite(state.run?.id, runId, recordToken, token)) patchOut.cases = state.cases.map((c) => (c.id === caseId ? { ...c, execution: previousExecution } : c));
     setState(patchOut);
     throw err;
   }
   const history = state.selectedId === caseId ? await api.get(`/api/cases/${encodeURIComponent(caseId)}/history`) : state.history;
-  if (token !== recordToken) {
-    // A newer call for this case already owns `cases`/`history`, but this write still
-    // succeeded: its field must not be left showing a stale draft or a stale 'failed' label.
+  if (!applyWrite(state.run?.id, runId, recordToken, token)) {
+    // A newer call for this case already owns `cases`/`history`, or the tester has changed
+    // run since this write was sent, but the write itself still succeeded: its field must not
+    // be left showing a stale draft or a stale 'failed' label. The slot carries the run it
+    // was written for, so marking it here cannot show anything in the run now on screen.
     if (fields.length) setState({ saveState: markFields(caseId, fields, 'saved', nowLabel()) });
     return;
   }
@@ -181,11 +184,29 @@ async function openDefect(caseId) {
 // the moment the dispatch is no longer running, and any earlier timer is always cleared first
 // so a fast sequence of dispatches or case switches never leaves two polls ticking at once.
 let pollTimer = null;
-function clearPoll() { clearTimeout(pollTimer); pollTimer = null; }
+let pollFailures = 0;
+function clearPoll() { clearTimeout(pollTimer); pollTimer = null; pollFailures = 0; }
+// A poll failure used to go through `guarded`, which raised the full width banner and did not
+// reschedule, so a single hiccup froze the panel until the tester pressed Refresh. Now a
+// failure backs off and tries again, and only a run of them gives up. The connection dot
+// already reports that the server is unreachable, so no banner is needed for one miss.
 function schedulePoll(defectId, dispatchState) {
   clearPoll();
   if (!defectId || dispatchState !== 'running') return;
-  pollTimer = setTimeout(() => guarded(() => refreshDefect(defectId)), 5000);
+  armPoll(defectId);
+}
+function armPoll(defectId) {
+  const delay = nextPollDelay(pollFailures);
+  if (delay === null) return;
+  pollTimer = setTimeout(async () => {
+    try {
+      await refreshDefect(defectId);
+      pollFailures = 0;
+    } catch {
+      pollFailures += 1;
+      armPoll(defectId);
+    }
+  }, delay);
 }
 
 async function dispatch(defectId, model) {
@@ -275,6 +296,7 @@ const actions = {
   toggleClosed: () => setState({ showClosed: !state.showClosed }),
   setView: (view) => setState({ view, confirmClose: null }),
   toggleFilters: () => setState({ filtersOpen: !state.filtersOpen }),
+  toggleRunsPane: () => setState({ runsPaneOpen: !state.runsPaneOpen }),
   setDispatchModel: (model) => setState({ dispatchModel: model }),
 };
 

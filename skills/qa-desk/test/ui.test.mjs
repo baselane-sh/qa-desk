@@ -81,9 +81,15 @@ test('a failed write only rolls back the case row when no newer write for that c
   const body = text.slice(start, end);
   assert.match(
     body,
-    /if \(token === recordToken\) patchOut\.cases = state\.cases\.map/,
-    'the rollback of `cases` on a failed write must be gated on this still being the most recent call for the case',
+    /if \(applyWrite\(state\.run\?\.id, runId, recordToken, token\)\) patchOut\.cases = state\.cases\.map/,
+    'the rollback of `cases` on a failed write must be gated on the run and on this still being the most recent call',
   );
+  assert.match(
+    body,
+    /if \(!applyWrite\(state\.run\?\.id, runId, recordToken, token\)\) \{/,
+    'the success path must be gated the same way, or a write answered after a run change lands on the wrong run',
+  );
+  assert.match(body, /const runId = state\.run\.id;/, 'record must capture the run it was sent for');
 });
 
 test('the execution textareas seed from the unsaved draft, never straight from the saved value, and are keyed to the case on screen', async () => {
@@ -464,15 +470,30 @@ test('the filters pane opens and closes through state, not a DOM class flip a re
   assert.doesNotMatch(cases, /document\.querySelector\('\[data-pane="filters"\]'\)/, 'the toggle must not flip a class on the pane node directly');
   assert.match(cases, /'aside', \{ class: `pane\$\{state\.filtersOpen \? ' open' : ''\}`, 'data-pane': 'filters' \}/, 'the pane\'s open class must be derived from state.filtersOpen on every render');
   assert.match(cases, /el\('button', \{ class: 'filters-toggle', text: 'Close', onclick: \(\) => actions\.toggleFilters\(\) \}\)/, 'the pane needs its own close control now that .open can only be reached from state');
+  // M1 and the shared-flag deferral: the Runs view's aside is a run list and a create-run
+  // form, so it gets its own pane name, its own open flag and its own label. Sharing them hid
+  // the run list behind a button marked Filters, and opening one pane opened the other.
   const runs = await read('views/runs.js');
-  assert.match(runs, /class: `pane\$\{state\.filtersOpen \? ' open' : ''\}`/, 'the Runs view filters pane must be driven by the same state flag');
+  assert.match(runs, /class: `pane\$\{state\.runsPaneOpen \? ' open' : ''\}`, 'data-pane': 'runs'/, 'the Runs aside must have its own open flag and pane name');
+  assert.doesNotMatch(runs, /state\.filtersOpen/, 'the Runs view must not share the Cases view filters flag');
+  assert.match(runs, /paneToggleButton\('Runs', \(\) => actions\.toggleRunsPane\(\)\)/, 'the toggle that opens it must say what it opens');
+  const css = await read('style.css');
+  assert.match(css, /\.pane\[data-pane="filters"\], \.pane\[data-pane="runs"\] \{ display: none; \}/, 'the new pane name must hide below the breakpoint like the old one');
+  assert.doesNotMatch(css, /\.toast\.error/, 'the error toast style is dead now the banner carries errors (M6)');
 });
 
 test('a running dispatch is polled every 5000ms, and the poll is cleared before every case or run switch', async () => {
   const text = await read('app.js');
   assert.match(text, /function schedulePoll\(defectId, dispatchState\) \{/);
   assert.match(text, /dispatchState !== 'running'/, 'the poll must stop once the dispatch is no longer running');
-  assert.match(text, /setTimeout\(\(\) => guarded\(\(\) => refreshDefect\(defectId\)\), 5000\)/);
+  // M5: a poll failure must back off and try again rather than raise the banner and stop.
+  assert.match(text, /function armPoll\(defectId\) \{/);
+  assert.match(text, /const delay = nextPollDelay\(pollFailures\);/);
+  const armBody = text.slice(text.indexOf('function armPoll('), text.indexOf('async function dispatch('));
+  // The manual Refresh action still banners on failure, and should; only the automatic poll
+  // must stay quiet and retry.
+  assert.doesNotMatch(armBody, /guarded\(/, 'a failed poll must not raise the full width banner');
+  assert.match(armBody, /pollFailures \+= 1;\s*\n\s*armPoll\(defectId\);/, 'a failed poll must reschedule itself');
   const selectCaseBody = text.slice(text.indexOf('async function selectCase('), text.indexOf('selectCase.token = 0;'));
   assert.match(selectCaseBody, /clearPoll\(\);/, 'switching cases must clear any earlier poll');
   const selectRunBody = text.slice(text.indexOf('async function selectRun('), text.indexOf('let recordToken'));
@@ -516,7 +537,10 @@ test('index.html carries an inline favicon and an svg sprite, and loads nothing 
   // render outside the HTML parser's foreign-content handling; that attribute value contains
   // "http://", so the network-free check below looks for an actual external src/href scheme
   // right after the opening quote, rather than banning the substring "http://" anywhere at all.
-  assert.doesNotMatch(html, /(?:src|href)\s*=\s*"https?:\/\//);
+  // Both quote styles: the narrowed check (the favicon's xmlns legitimately carries a URL)
+  // used to match only double quotes, so src='http://...' would have passed (M2).
+  assert.doesNotMatch(html, /(?:src|href)\s*=\s*['"]https?:\/\//);
+  assert.doesNotMatch(html, /(?:src|href)\s*=\s*['"]\/\//, 'a protocol relative URL loads over the network too');
 });
 
 test('a failed fetch reports offline; any answer reports online again', async () => {
@@ -572,4 +596,52 @@ test('a failed draft never crosses a run change, so the same case in another run
   const afterRun2 = nextSaveState(afterFail, idle, 'QA-0001', ['evidence'], 'saved', '14:05:09', null, 'R-0002');
   assert.equal(afterRun2.actual.draft, null);
   assert.equal(afterRun2.runId, 'R-0002');
+});
+
+test('ownsSlot is the single answer for both the textarea seed and its label (re-review B)', async () => {
+  const { ownsSlot, fieldValue } = await import('../public/status.js');
+  const slot = { caseId: 'QA-0001', runId: 'R-0001', actual: { status: 'failed', at: null, draft: 'draft text' } };
+  assert.equal(ownsSlot(slot, 'QA-0001', 'R-0001'), true);
+  assert.equal(ownsSlot(slot, 'QA-0002', 'R-0001'), false);
+  assert.equal(ownsSlot(slot, 'QA-0001', 'R-0002'), false);
+  // The disagreement that was deferred: an idle slot holds null, and a caller with no case
+  // passes undefined. Both must read as "this slot is not yours", the same way in both.
+  const idle = { caseId: null, runId: null };
+  assert.equal(ownsSlot(idle, undefined, undefined), true);
+  assert.equal(ownsSlot(idle, 'QA-0001', null), false);
+  assert.equal(fieldValue(slot, { actual: 'saved' }, 'actual', 'QA-0001', 'R-0001'), 'draft text');
+  assert.equal(fieldValue(slot, { actual: 'saved' }, 'actual', 'QA-0001', 'R-0002'), 'saved');
+});
+
+test('applyWrite refuses a write answered after the tester changed run or started a newer write', async () => {
+  const { applyWrite } = await import('../public/status.js');
+  assert.equal(applyWrite('R-0001', 'R-0001', 7, 7), true);
+  // The deferred defect: the run changed while the write was in flight, so its execution
+  // would land on the row now showing a different run.
+  assert.equal(applyWrite('R-0002', 'R-0001', 7, 7), false);
+  assert.equal(applyWrite('R-0001', 'R-0001', 8, 7), false);
+  assert.equal(applyWrite(null, null, 1, 1), true);
+});
+
+test('nextPollDelay keeps polling through a hiccup and gives up after a run of failures (M5)', async () => {
+  const { nextPollDelay } = await import('../public/status.js');
+  assert.equal(nextPollDelay(0), 5000);
+  assert.equal(nextPollDelay(1), 10000);
+  assert.equal(nextPollDelay(2), 15000);
+  assert.equal(nextPollDelay(3), null);
+});
+
+test('the selected run card counts from the cases on screen, so it cannot disagree with the strip (qd-d1e)', async () => {
+  const { liveSummary } = await import('../public/views/runs.js');
+  const run = { id: 'R-0001', caseIds: ['QA-0001', 'QA-0002'], summary: { total: 2, executed: 0, counts: { passed: 0, failed: 0, blocked: 0, skipped: 0, retest: 0, untested: 2 } } };
+  const cases = [
+    { id: 'QA-0001', execution: { status: 'passed' } },
+    { id: 'QA-0002', execution: null },
+  ];
+  // Another run's row keeps the number the server sent with the runs list.
+  assert.equal(liveSummary(run, 'R-0002', cases).executed, 0);
+  // The selected run's row is counted from the same cases the strip counts, so recording a
+  // verdict moves both at once instead of leaving the card at "0 of 2 done" until a reload.
+  assert.equal(liveSummary(run, 'R-0001', cases).executed, 1);
+  assert.equal(liveSummary(run, 'R-0001', cases).total, 2);
 });

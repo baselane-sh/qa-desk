@@ -3,6 +3,10 @@
 
 export function saveStateLabel(state, at) {
   switch (state) {
+    // Not rendered today: a save starts from a blur handler and showing it would need a
+    // redraw mid blur, which is the hazard the focus capture and restore work exists to
+    // prevent. Kept because the label belongs with its siblings the day a save is started
+    // from somewhere other than a blur.
     case 'saving': return 'Saving';
     case 'saved': return `Saved ${at}`;
     case 'failed': return 'Not saved. Edit again to retry.';
@@ -41,11 +45,35 @@ export function tallyLabel({ visible, total, counts = {} }) {
 // case that produced it: reading it back for any other case (the normal result of a case
 // switch racing a save, see app.js's `record`) would seed that case's box with someone
 // else's text, so a caseId mismatch is treated exactly like no draft at all.
-export function fieldValue(saveState, execution, field, caseId, runId = null) {
-  const matches = (saveState?.caseId ?? undefined) === caseId
+// The one predicate that decides whether the shared save-state slot belongs to the case and
+// run being drawn right now. fieldValue (the textarea seed) and saveStateNode (the label
+// beside it) both ask it, so the two can never disagree: before this was shared, a caseId of
+// undefined matched a slot holding null in one of them and not in the other.
+export function ownsSlot(saveState, caseId, runId = null) {
+  return (saveState?.caseId ?? null) === (caseId ?? null)
     && (saveState?.runId ?? null) === (runId ?? null);
-  const draft = matches ? saveState?.[field]?.draft : undefined;
+}
+
+export function fieldValue(saveState, execution, field, caseId, runId = null) {
+  const draft = ownsSlot(saveState, caseId, runId) ? saveState?.[field]?.draft : undefined;
   return draft ?? execution?.[field] ?? '';
+}
+
+// A write is answered by the server some time after it was sent. It may only be written into
+// `cases` and `history` if the tester is still looking at the run it was sent for and no
+// newer write for the same case has overtaken it. Without the run half, switching runs mid
+// write lands run A's execution on the row now showing run B.
+export function applyWrite(currentRunId, writeRunId, currentToken, writeToken) {
+  return (currentRunId ?? null) === (writeRunId ?? null) && currentToken === writeToken;
+}
+
+// Polling a running dispatch must survive a hiccup: one failed poll used to raise the full
+// width banner and stop the timer, so the panel froze until the tester pressed Refresh.
+// Returns the delay for the next attempt, or null once the run of consecutive failures is
+// long enough that the server is clearly not coming back on its own.
+export function nextPollDelay(consecutiveFailures, base = 5000, maxFailures = 3) {
+  if (consecutiveFailures >= maxFailures) return null;
+  return base * (consecutiveFailures + 1);
 }
 
 // The slot is shared by both fields, so a write for a different case must not carry the

@@ -1,5 +1,5 @@
-import { el, renderList, renderProgress, renderCaseDetail, matchesFilters, statusOf, filtersToggleButton } from './cases.js';
-import { saveStateLabel, fieldValue } from '../status.js';
+import { el, renderList, renderProgress, renderCaseDetail, matchesFilters, statusOf, filtersToggleButton, paneToggleButton } from './cases.js';
+import { saveStateLabel, fieldValue, ownsSlot } from '../status.js';
 import { icon } from '../icons.js';
 
 const STATUSES = ['passed', 'failed', 'blocked', 'skipped', 'retest'];
@@ -38,6 +38,18 @@ export function countStatuses(cases) {
     counts[SUMMARY_STATUSES.includes(status) ? status : 'untested'] += 1;
   }
   return { total: cases.length, executed: cases.length - counts.untested, counts };
+}
+
+/**
+ * The runs list carries the summary the server computed when /api/runs was last fetched, and
+ * that happens on boot, on create and on close only. Recording a verdict never refetches it,
+ * so the selected run's card sat at "0 of 600 done" while the strip directly above it, counted
+ * from the cases now in state, already read "1 of 600 done" (qd-d1e). For the run on screen
+ * the counted number is the truthful one; every other row keeps the server's.
+ */
+export function liveSummary(run, selectedRunId, cases) {
+  if (run.id !== selectedRunId) return run.summary;
+  return headerSummary(countStatuses(cases.filter((c) => run.caseIds.includes(c.id))), run.summary);
 }
 
 export function summaryLabel(summary) {
@@ -103,7 +115,7 @@ function runList(state, actions) {
   }
   const items = rows.map((r) => el('li', { class: state.run?.id === r.id ? 'selected' : '', onclick: () => actions.selectRun(r) }, [
     el('span', {}, [el('span', { class: 'tabular', text: r.id }), ` ${r.name}`]),
-    isClosed(r) ? el('span', { class: 'badge closed', text: 'Closed' }) : el('span', { class: 'badge', text: summaryLabel(r.summary) || `${r.caseIds.length} cases` }),
+    isClosed(r) ? el('span', { class: 'badge closed', text: 'Closed' }) : el('span', { class: 'badge', text: summaryLabel(liveSummary(r, state.run?.id ?? null, state.cases)) || `${r.caseIds.length} cases` }),
     el('span', { class: 'meta', text: `${r.build} · ${r.env} · ${r.createdAt.slice(0, 10)}` }),
   ]));
   return el('div', {}, [bar, el('ul', { class: 'list' }, items)]);
@@ -161,8 +173,7 @@ function pickList(values, current, locked, onchange, focusKey) {
 // saveState is shared across every case; a label only belongs on screen while it was
 // written for the case being rendered right now (see fieldValue in status.js).
 function saveStateNode(state, field, caseId) {
-  const ownSlot = state.saveState?.caseId === caseId && (state.saveState?.runId ?? null) === (state.run?.id ?? null);
-  const info = ownSlot ? state.saveState?.[field] : null;
+  const info = ownsSlot(state.saveState, caseId, state.run?.id ?? null) ? state.saveState?.[field] : null;
   const text = info ? saveStateLabel(info.status, info.at) : '';
   return text ? el('span', { class: `save-state ${info.status}`, text: ` · ${text}` }) : null;
 }
@@ -240,13 +251,13 @@ export function renderRuns(root, state, actions) {
   // its own close control (filters-toggle is display:none above the breakpoint where this
   // pane hides at all, same as the open button), since state-driven `.open` is otherwise the
   // only way to close it and the button that opens it lives outside this pane.
-  const left = el('aside', { class: `pane${state.filtersOpen ? ' open' : ''}`, 'data-pane': 'filters' }, [
-    el('div', { class: 'pane-head' }, [el('h2', { text: 'Runs' }), el('button', { class: 'filters-toggle', text: 'Close', onclick: () => actions.toggleFilters() })]),
+  const left = el('aside', { class: `pane${state.runsPaneOpen ? ' open' : ''}`, 'data-pane': 'runs' }, [
+    el('div', { class: 'pane-head' }, [el('h2', { text: 'Runs' }), el('button', { class: 'filters-toggle', text: 'Close', onclick: () => actions.toggleRunsPane() })]),
     runList(state, actions),
     newRunForm(state, actions),
   ]);
   if (!state.run) {
-    root.append(left, el('section', { class: 'pane', 'data-pane': 'list' }, [el('div', { class: 'pane-head' }, [filtersToggleButton(actions)]), el('p', { class: 'empty', text: 'Pick a run or create one' })]), el('section', { class: 'pane', 'data-pane': 'detail' }, [renderProgress(state)]));
+    root.append(left, el('section', { class: 'pane', 'data-pane': 'list' }, [el('div', { class: 'pane-head' }, [paneToggleButton('Runs', () => actions.toggleRunsPane())]), el('p', { class: 'empty', text: 'Pick a run or create one' })]), el('section', { class: 'pane', 'data-pane': 'detail' }, [renderProgress(state)]));
     return;
   }
   const inRunAll = inRunCases(state.cases, state.run);
@@ -258,6 +269,6 @@ export function renderRuns(root, state, actions) {
     : [renderProgress(state), ...(state.config.roles.length ? [el('h2', { text: 'By role' }), renderProgress(state, 'role')] : []), el('p', { class: 'empty', text: 'Select a case. Keys: j/k move, p f b s r record.' })];
   const summary = headerSummary(countStatuses(inRunAll), state.run.summary);
   const controls = el('div', { class: 'pane-head' }, [statusFilter(state, actions), closeControl(state, actions)]);
-  const head = el('div', {}, [el('div', { class: 'pane-head' }, [el('h2', { text: `${state.run.name} (${inRun.length})` }), el('span', { class: 'badge', text: summaryLabel(summary) }), filtersToggleButton(actions)]), statusStrip(summary), controls]);
+  const head = el('div', {}, [el('div', { class: 'pane-head' }, [el('h2', { text: `${state.run.name} (${inRun.length})` }), el('span', { class: 'badge', text: summaryLabel(summary) }), paneToggleButton('Runs', () => actions.toggleRunsPane())]), statusStrip(summary), controls]);
   root.append(left, el('section', { class: 'pane', 'data-pane': 'list' }, [head, renderList(state, actions, inRun, inRunAll.length)]), el('section', { class: 'pane', 'data-pane': 'detail' }, right));
 }
