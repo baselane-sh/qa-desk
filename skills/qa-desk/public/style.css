@@ -36,6 +36,7 @@ textarea { min-height: 90px; resize: vertical; }
 .list li .meta { font-size: 12px; color: var(--muted); }
 .list li .title-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .list li .case-title { flex: 1; min-width: 0; overflow: hidden; unicode-bidi: plaintext; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.list li .meta-row { display: flex; align-items: center; gap: 8px; }
 .list li .run-badges { display: inline-flex; align-items: center; gap: 4px; }
 .status { font-size: 11px; padding: 1px 6px; border-radius: 4px; color: #fff; text-transform: uppercase; }
 .status.passed { background: var(--pass); } .status.failed { background: var(--fail); } .status.blocked { background: var(--blocked); } .status.skipped { background: var(--skip); } .status.retest { background: var(--retest); } .status.untested { background: #9aa4b2; }

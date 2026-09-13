@@ -159,14 +159,18 @@ export function renderList(state, actions, cases, total) {
         el('span', { class: 'case-id tabular', text: c.id }),
         el('span', { class: 'case-title', text: c.title }),
       ]),
-      el('span', { class: 'meta', text: [c.component, ...(c.actors ?? [])].join(' · ') }),
-      chips.length ? el('span', { class: 'chips' }, chips.map((x) => el('span', { class: x.className, text: x.text }))) : null,
       // A full uppercase status badge per open run was the same wall of grey blocks the
       // verdict dot at the front of the row exists to remove, reintroduced one line below
       // it (with two or three runs open, three of them). A dot with the run and status in
       // its title gets the same treatment as statusOf(c) above; there is nowhere in the
       // detail pane today that shows a case's per-run history, so nothing full-size is lost.
-      badges.length ? el('span', { class: 'meta run-badges' }, badges.map((b) => el('span', { class: `verdict-dot ${b.status}`, title: `${b.runId}: ${b.status}` }))) : null,
+      // The dots share the component line rather than taking a fourth line of their own:
+      // a row of 600 cannot spend a whole line on one 9px dot.
+      el('span', { class: 'meta meta-row' }, [
+        el('span', { text: [c.component, ...(c.actors ?? [])].join(' · ') }),
+        badges.length ? el('span', { class: 'run-badges' }, badges.map((b) => el('span', { class: `verdict-dot ${b.status}`, title: `${b.runId}: ${b.status}` }))) : null,
+      ]),
+      chips.length ? el('span', { class: 'chips' }, chips.map((x) => el('span', { class: x.className, text: x.text }))) : null,
     ]);
   }));
 }
