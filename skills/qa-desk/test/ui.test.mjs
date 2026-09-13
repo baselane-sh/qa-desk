@@ -536,3 +536,22 @@ test('a failed fetch reports offline; any answer reports online again', async ()
     onConnection(() => {});
   }
 });
+
+test('nextSaveState never carries one case save state onto another', async () => {
+  const { nextSaveState, fieldValue } = await import('../public/status.js');
+  const idle = { caseId: null, actual: { status: 'idle', at: null, draft: null }, evidence: { status: 'idle', at: null, draft: null } };
+  // case 1's actual save fails and keeps the tester's text as a draft
+  const afterFail = nextSaveState(idle, idle, 'QA-0001', ['actual'], 'failed', null, { actual: 'SECRET case 1 text' });
+  assert.equal(afterFail.actual.draft, 'SECRET case 1 text');
+  // the tester moves to case 2 and saves its evidence. The shared slot must not re-point
+  // case 1's actual draft at case 2, or the next blur writes case 1's text onto case 2.
+  const afterCase2 = nextSaveState(afterFail, idle, 'QA-0002', ['evidence'], 'saved', '14:05:09');
+  assert.equal(afterCase2.caseId, 'QA-0002');
+  assert.equal(afterCase2.actual.draft, null, 'case 1 draft leaked onto case 2');
+  assert.equal(fieldValue(afterCase2, { actual: 'case 2 own actual' }, 'actual', 'QA-0002'), 'case 2 own actual');
+  // and the same case keeps its own other field across a write
+  const sameCase = nextSaveState(afterFail, idle, 'QA-0001', ['evidence'], 'saved', '14:06:00');
+  assert.equal(sameCase.actual.draft, 'SECRET case 1 text');
+  // an empty field list changes nothing at all
+  assert.equal(nextSaveState(afterFail, idle, 'QA-0002', [], 'saved'), afterFail);
+});

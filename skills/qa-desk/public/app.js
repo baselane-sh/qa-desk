@@ -4,7 +4,7 @@ import { renderRuns } from './views/runs.js';
 import { nextIndex, debounce, keyAction } from './keys.js';
 import { loadFilters, saveFilters } from './filters-store.js';
 import { captureField, restoreField } from './ui-restore.js';
-import { connectionLabel, OFFLINE_HELP } from './status.js';
+import { connectionLabel, OFFLINE_HELP, nextSaveState } from './status.js';
 
 const VIEWS = { cases: renderCases, runs: renderRuns };
 // caseId isolates this shared, single-slot save state to whichever case it was actually
@@ -102,10 +102,7 @@ function nowLabel() {
 // caseId is stamped on every write so fieldValue/saveStateNode can tell "this case's own
 // save state" from "the case that was selected the last time a write completed".
 function markFields(caseId, fields, status, at = null, draftPatch = null) {
-  if (!fields.length) return state.saveState;
-  const next = { ...state.saveState, caseId };
-  for (const f of fields) next[f] = { status, at, draft: draftPatch?.[f] ?? null };
-  return next;
+  return nextSaveState(state.saveState, IDLE_SAVE_STATE, caseId, fields, status, at, draftPatch);
 }
 
 // Two records on the same case inside one round trip can otherwise resolve out of order,

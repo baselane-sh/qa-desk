@@ -46,3 +46,15 @@ export function fieldValue(saveState, execution, field, caseId) {
   const draft = matches ? saveState?.[field]?.draft : undefined;
   return draft ?? execution?.[field] ?? '';
 }
+
+// The slot is shared by both fields, so a write for a different case must not carry the
+// previous case's other field across: re-stamping caseId alone would re-point case A's
+// failed actual draft at case B the moment case B saved its evidence, and the next blur or
+// the pagehide flush would then write A's text onto B.
+export function nextSaveState(current, idle, caseId, fields, status, at = null, draftPatch = null) {
+  if (!fields.length) return current;
+  const base = current?.caseId === caseId ? current : idle;
+  const next = { ...base, caseId };
+  for (const f of fields) next[f] = { status, at, draft: draftPatch?.[f] ?? null };
+  return next;
+}
